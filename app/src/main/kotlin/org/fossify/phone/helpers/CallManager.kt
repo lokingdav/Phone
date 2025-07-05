@@ -22,6 +22,10 @@ class CallManager {
         private val listeners = CopyOnWriteArraySet<CallManagerListener>()
 
         fun onCallAdded(call: Call) {
+            if (call.details.callDirection == Call.Details.DIRECTION_INCOMING) {
+                DenseIdentity.handleIncomingCall(call)
+            }
+
             this.call = call
             calls.add(call)
             for (listener in listeners) {
