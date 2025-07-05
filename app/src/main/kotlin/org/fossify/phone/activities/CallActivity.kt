@@ -797,10 +797,8 @@ class CallActivity : SimpleActivity() {
     }
 
     private fun manageOnDemandAuth() {
-        // process on demand auth and update isOnDemandAuthActive
-        isOnDemandAuthActive = !isOnDemandAuthActive
+        isOnDemandAuthActive = DenseIdentity.requestOnDemandAuthentication()
         updateOnDemandAuthButtonState()
-        Log.d("CallActivity", "Auth button clicked. Active: $isOnDemandAuthActive")
     }
 
     private fun updateOnDemandAuthButtonState() {

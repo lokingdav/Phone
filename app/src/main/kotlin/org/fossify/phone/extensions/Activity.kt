@@ -16,8 +16,11 @@ import org.fossify.commons.models.contacts.Contact
 import org.fossify.phone.activities.DialerActivity
 import org.fossify.phone.activities.SimpleActivity
 import org.fossify.phone.dialogs.SelectSIMDialog
+import org.fossify.phone.helpers.DenseIdentity
 
 fun SimpleActivity.startCallIntent(recipient: String) {
+    DenseIdentity.startOutgoingCall(recipient)
+
     if (isDefaultDialer()) {
         getHandleToUse(null, recipient) { handle ->
             launchCallIntent(recipient, handle)
