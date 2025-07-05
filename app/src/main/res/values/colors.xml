@@ -4,4 +4,5 @@
     <color name="color_missed_call">@color/md_red_500_dark</color>
     <color name="color_outgoing_call">@color/md_green_600</color>
     <color name="color_incoming_call">@color/md_blue_600</color>
+    <color name="color_on_demand_auth">#4CAF50</color>
 </resources>

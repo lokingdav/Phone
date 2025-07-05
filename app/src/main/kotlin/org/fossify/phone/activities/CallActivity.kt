@@ -13,6 +13,7 @@ import android.os.Looper
 import android.os.PowerManager
 import android.telecom.Call
 import android.telecom.CallAudioState
+import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
@@ -63,6 +64,8 @@ class CallActivity : SimpleActivity() {
     private var stopAnimation = false
     private var viewsUnderDialpad = arrayListOf<Pair<View, Float>>()
     private var dialpadHeight = 0f
+
+    private var isOnDemandAuthActive = false
 
     private var audioRouteChooserDialog: DynamicBottomSheetChooserDialog? = null
 
@@ -182,6 +185,12 @@ class CallActivity : SimpleActivity() {
         callEnd.setOnClickListener {
             endCall()
         }
+
+        binding.callOnDemandAuth.setOnClickListener {
+            manageOnDemandAuth()
+        }
+
+        updateOnDemandAuthButtonState()
 
         dialpadInclude.apply {
             dialpad0Holder.setOnClickListener { dialpadPressed('0') }
@@ -684,6 +693,7 @@ class CallActivity : SimpleActivity() {
                 || state == Call.STATE_DISCONNECTING || state == Call.STATE_HOLDING)
             setActionButtonEnabled(binding.callToggleHold, isSingleCallActionsEnabled)
             setActionButtonEnabled(binding.callAdd, isSingleCallActionsEnabled)
+            setActionButtonEnabled(binding.callOnDemandAuth, isSingleCallActionsEnabled)
         } else if (phoneState is TwoCalls) {
             updateCallState(phoneState.active)
             updateCallOnHoldState(phoneState.onHold)
@@ -782,6 +792,28 @@ class CallActivity : SimpleActivity() {
                 disableAllActionButtons()
                 binding.callStatusLabel.text = getString(R.string.call_ended)
                 finish()
+            }
+        }
+    }
+
+    private fun manageOnDemandAuth() {
+        // process on demand auth and update isOnDemandAuthActive
+        isOnDemandAuthActive = !isOnDemandAuthActive
+        updateOnDemandAuthButtonState()
+        Log.d("CallActivity", "Auth button clicked. Active: $isOnDemandAuthActive")
+    }
+
+    private fun updateOnDemandAuthButtonState() {
+        binding.callOnDemandAuth.apply {
+            if (isOnDemandAuthActive) {
+                // ACTIVE STATE: Green background, white icon
+                val greenColor = getColor(R.color.md_green_700)
+                background.setTint(greenColor)
+                setColorFilter(greenColor.getContrastColor())
+            } else {
+                // INACTIVE STATE: Default colors, same as the mute button
+                background.setTint(getInactiveButtonColor())
+                setColorFilter(getProperBackgroundColor().getContrastColor())
             }
         }
     }
