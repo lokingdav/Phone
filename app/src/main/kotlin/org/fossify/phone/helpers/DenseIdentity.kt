@@ -4,6 +4,10 @@ import android.telecom.Call
 import android.util.Log
 
 object DenseIdentity {
+    fun enrollNewNumber(phoneNumber: String, displayName: String, logoUrl: String) {
+        Log.d("Dense Identity", "Enrolling new number: $phoneNumber, Display Name: $displayName, Logo URL: $logoUrl")
+    }
+
     fun startOutgoingCall(recipient: String) {
         Log.d("Dense Identity", "Handling call for recipient: $recipient")
     }

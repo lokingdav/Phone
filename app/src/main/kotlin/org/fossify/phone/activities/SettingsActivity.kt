@@ -22,6 +22,7 @@ import org.fossify.phone.databinding.ActivitySettingsBinding
 import org.fossify.phone.dialogs.ExportCallHistoryDialog
 import org.fossify.phone.dialogs.ManageVisibleTabsDialog
 import org.fossify.phone.extensions.config
+import org.fossify.phone.fragments.EnrollmentDialogFragment
 import org.fossify.phone.helpers.RecentsHelper
 import org.fossify.phone.models.RecentCall
 import java.util.Locale
@@ -68,6 +69,12 @@ class SettingsActivity : SimpleActivity() {
         }
     }
 
+    private fun setupEnrollment() {
+        binding.settingsEnrollmentHolder.setOnClickListener {
+            EnrollmentDialogFragment().show(supportFragmentManager, "EnrollmentDialog")
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         setupToolbar(binding.settingsToolbar, NavigationIcon.Arrow)
@@ -78,6 +85,7 @@ class SettingsActivity : SimpleActivity() {
         setupLanguage()
         setupManageBlockedNumbers()
         setupManageSpeedDial()
+        setupEnrollment()
         setupChangeDateTimeFormat()
         setupFontSize()
         setupManageShownTabs()
