@@ -2,12 +2,14 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import org.jetbrains.kotlin.konan.properties.Properties
 import java.io.FileInputStream
+import com.google.protobuf.gradle.*
 
 plugins {
     alias(libs.plugins.android)
     alias(libs.plugins.kotlinAndroid)
     alias(libs.plugins.kotlinSerialization)
     alias(libs.plugins.detekt)
+    id("com.google.protobuf") version "0.9.5"
 }
 
 val keystorePropertiesFile: File = rootProject.file("keystore.properties")
@@ -18,9 +20,9 @@ if (keystorePropertiesFile.exists()) {
 
 fun hasSigningVars(): Boolean {
     return providers.environmentVariable("SIGNING_KEY_ALIAS").orNull != null
-            && providers.environmentVariable("SIGNING_KEY_PASSWORD").orNull != null
-            && providers.environmentVariable("SIGNING_STORE_FILE").orNull != null
-            && providers.environmentVariable("SIGNING_STORE_PASSWORD").orNull != null
+        && providers.environmentVariable("SIGNING_KEY_PASSWORD").orNull != null
+        && providers.environmentVariable("SIGNING_STORE_FILE").orNull != null
+        && providers.environmentVariable("SIGNING_STORE_PASSWORD").orNull != null
 }
 
 android {
@@ -143,4 +145,42 @@ dependencies {
     implementation(libs.libphonenumber)
     implementation(libs.geocoder)
     detektPlugins(libs.compose.detekt)
+
+    // Kotlin standard library
+    implementation(kotlin("stdlib-jdk8"))
+
+    // Coroutines (for gRPC Kotlin stubs)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+
+    // gRPC Java libraries
+    implementation(libs.grpc.okhttp)
+    implementation(libs.grpc.protobuf.lite)
+    implementation(libs.grpc.stub)
+    implementation(libs.javax.annotation.api)
+
+    // gRPC Kotlin stub runtime
+    implementation("io.grpc:grpc-kotlin-stub:1.4.3")
+}
+
+protobuf {
+    protoc {
+        artifact = "com.google.protobuf:protoc:3.25.3"
+    }
+    plugins {
+        create("grpc") {
+            artifact = "io.grpc:protoc-gen-grpc-java:1.62.2"
+        }
+        create("grpckt") {
+            artifact = "io.grpc:protoc-gen-grpc-kotlin:1.4.1:jdk8@jar"
+        }
+    }
+    generateProtoTasks {
+        all().forEach { task ->
+            task.plugins {
+                id("grpc")
+                id("grpckt")
+            }
+        }
+    }
 }
