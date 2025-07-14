@@ -2,6 +2,7 @@ package org.fossify.phone.helpers
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 
 /**
  * A simple key–value store backed by SharedPreferences.
@@ -13,6 +14,7 @@ object DenseIdentityStore {
 
     /** Must be called before any other method */
     fun init(context: Context) {
+        Log.d("DenseIdentityStore", "init DenseIdentityStore")
         prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
 

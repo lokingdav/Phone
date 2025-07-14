@@ -2,10 +2,13 @@ package org.fossify.phone.helpers
 
 import android.telecom.Call
 import android.util.Log
+import java.security.KeyPair
 
 object DenseIdentity {
     fun enrollNewNumber(phoneNumber: String, displayName: String, logoUrl: String) {
-        Log.d("Dense Identity", "Enrolling new number: $phoneNumber, Display Name: $displayName, Logo URL: $logoUrl")
+        val keys = Signing.regSigKeygen()
+        val pkStr = Signing.exportPublicKeyToHexString(keys.public);
+        Log.d("Dense Identity", "Enrolling new number=$phoneNumber, Display Name=$displayName, Logo URL=$logoUrl, pk=$pkStr")
     }
 
     fun startOutgoingCall(recipient: String) {

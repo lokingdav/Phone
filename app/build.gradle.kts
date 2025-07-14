@@ -131,6 +131,10 @@ android {
             enableSplit = false
         }
     }
+
+    packaging {
+        resources.excludes.add("META-INF/versions/9/OSGI-INF/MANIFEST.MF")
+    }
 }
 
 detekt {
@@ -169,6 +173,8 @@ dependencies {
 
     // gRPC Kotlin stub runtime
     implementation("io.grpc:grpc-kotlin-stub:1.4.3")
+
+    implementation("org.bouncycastle:bcprov-jdk18on:1.81")
 }
 
 // Protobuf configuration block
