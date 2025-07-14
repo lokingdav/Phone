@@ -88,6 +88,10 @@ android {
 
     sourceSets {
         getByName("main").java.srcDirs("src/main/kotlin")
+        // Add the generated proto sources to the source set
+        getByName("main").java.srcDirs("build/generated/sources/proto/main/java")
+        getByName("main").java.srcDirs("build/generated/sources/proto/main/grpc")
+        getByName("main").java.srcDirs("build/generated/sources/proto/main/grpckt")
     }
 
     compileOptions {
@@ -150,35 +154,55 @@ dependencies {
     implementation(kotlin("stdlib-jdk8"))
 
     // Coroutines (for gRPC Kotlin stubs)
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    // Note: It's good practice to use a BOM (Bill of Materials) to manage coroutine versions
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
 
-    // gRPC Java libraries
+    // gRPC Dependencies
     implementation(libs.grpc.okhttp)
     implementation(libs.grpc.protobuf.lite)
     implementation(libs.grpc.stub)
     implementation(libs.javax.annotation.api)
 
+    // Added: Protobuf-javalite for core protobuf classes and well-known types like Timestamp
+    implementation("com.google.protobuf:protobuf-javalite:3.25.3")
+
     // gRPC Kotlin stub runtime
     implementation("io.grpc:grpc-kotlin-stub:1.4.3")
 }
 
+// Protobuf configuration block
 protobuf {
     protoc {
+        // The version of the protobuf compiler
         artifact = "com.google.protobuf:protoc:3.25.3"
     }
     plugins {
+        // Plugin for generating Java gRPC service stubs
         create("grpc") {
-            artifact = "io.grpc:protoc-gen-grpc-java:1.62.2"
+            artifact = "io.grpc:protoc-gen-grpc-java:1.64.0"
         }
+        // Plugin for generating Kotlin gRPC service stubs
         create("grpckt") {
-            artifact = "io.grpc:protoc-gen-grpc-kotlin:1.4.1:jdk8@jar"
+            // FIX: Matched version with the grpc-kotlin-stub dependency (1.4.3)
+            artifact = "io.grpc:protoc-gen-grpc-kotlin:1.4.3:jdk8@jar"
         }
     }
     generateProtoTasks {
         all().forEach { task ->
+            // FIX: Configure the built-in 'java' plugin to generate message classes
+            task.builtins {
+                create("java") {
+                    // Must generate 'lite' messages to match the 'grpc-protobuf-lite' runtime
+                    option("lite")
+                }
+            }
+            // Configure the external gRPC plugins
             task.plugins {
-                id("grpc")
+                id("grpc") {
+                    // The generated service stubs must also be 'lite'
+                    option("lite")
+                }
                 id("grpckt")
             }
         }
