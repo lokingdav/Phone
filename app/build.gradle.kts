@@ -12,6 +12,11 @@ plugins {
     id("com.google.protobuf") version "0.9.5"
 }
 
+val denseid_es1_host: String = System.getenv("DENSEID_ES1_HOST") ?: "10.0.2.2"
+val denseid_es1_port: String = System.getenv("DENSEID_ES1_PORT") ?: "50051"
+val denseid_es2_host: String = System.getenv("DENSEID_ES2_HOST") ?: "10.0.2.2"
+val denseid_es2_port: String = System.getenv("DENSEID_ES2_PORT") ?: "50052"
+
 val keystorePropertiesFile: File = rootProject.file("keystore.properties")
 val keystoreProperties = Properties()
 if (keystorePropertiesFile.exists()) {
@@ -35,6 +40,11 @@ android {
         versionName = project.property("VERSION_NAME").toString()
         versionCode = project.property("VERSION_CODE").toString().toInt()
         setProperty("archivesBaseName", "phone-$versionCode")
+
+        buildConfigField("String", "DENSEID_ES1_HOST", "\"$denseid_es1_host\"")
+        buildConfigField("int",    "DENSEID_ES1_PORT", denseid_es1_port)
+        buildConfigField("String", "DENSEID_ES2_HOST", "\"$denseid_es2_host\"")
+        buildConfigField("int",    "DENSEID_ES2_PORT", denseid_es2_port)
     }
 
     signingConfigs {
