@@ -63,23 +63,21 @@ object Signing {
     }
 
     /** Extract and hex-encode the raw 32-byte Ed25519 public key. */
-    fun exportPublicKeyToHexString(publicKey: PublicKey): String {
+    fun exportPublicKeysToBytes(publicKey: PublicKey): ByteArray {
         val spki = SubjectPublicKeyInfo.getInstance(ASN1Primitive.fromByteArray(publicKey.encoded))
-        val raw = spki.publicKeyData.bytes
-        return encodeToHex(raw)
+        return spki.publicKeyData.bytes
     }
 
     /** Extract and hex-encode the raw Ed25519 private key (seed). */
-    fun exportPrivateKeyToHexString(privateKey: PrivateKey): String {
+    fun exportPrivateKeyToBytes(privateKey: PrivateKey): ByteArray {
         val p8 = PrivateKeyInfo.getInstance(ASN1Primitive.fromByteArray(privateKey.encoded))
         val raw = (p8.privateKeyAlgorithm.parameters as? DEROctetString)?.octets
             ?: p8.parsePrivateKey().toASN1Primitive().encoded
-        return encodeToHex(raw)
+        return raw
     }
 
     /** Import a raw 32-byte public key (hex) back into a PublicKey. */
-    fun importPublicKeyFromHex(hex: String): PublicKey {
-        val raw = decodeString(hex)
+    fun importPublicKeyFromBytes(raw: ByteArray): PublicKey {
         val spki = SubjectPublicKeyInfo(
             AlgorithmIdentifier(EdECObjectIdentifiers.id_Ed25519),
             DERBitString(raw)
@@ -89,8 +87,7 @@ object Signing {
     }
 
     /** Import a raw Ed25519 private key (hex seed) back into a PrivateKey. */
-    fun importPrivateKeyFromHex(hex: String): PrivateKey {
-        val raw = decodeString(hex)
+    fun importPrivateKeyFromBytes(raw: ByteArray): PrivateKey {
         // wrap raw into PKCS#8 PrivateKeyInfo
         val p8 = PrivateKeyInfo(
             AlgorithmIdentifier(EdECObjectIdentifiers.id_Ed25519),

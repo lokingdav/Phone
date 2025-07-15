@@ -2,6 +2,7 @@
 package org.fossify.phone.helpers
 
 import android.util.Log
+import com.google.protobuf.ByteString
 import denseid.enrollment.v1.Enrollment
 import denseid.enrollment.v1.EnrollmentServiceGrpc
 import io.grpc.ManagedChannelBuilder
@@ -31,7 +32,8 @@ object ManageEnrollment {
 
         // 1) Generate signing keypair
         val keys = Signing.regSigKeygen()
-        val publicKeyHex = Signing.exportPublicKeyToHexString(keys.public)
+        val publicKeyBytes = Signing.exportPublicKeysToBytes(keys.public)
+        val publicKeyHex = Signing.encodeToHex(publicKeyBytes)
         Log.d(TAG, "🔑 Generated key, pubHex=$publicKeyHex")
 
         // 2) Build the DisplayInformation message
@@ -44,7 +46,7 @@ object ManageEnrollment {
         val nonce = UUID.randomUUID().toString()
         val unsigned = Enrollment.EnrollmentRequest.newBuilder()
             .setTn(phoneNumber)
-            .addPublicKeys(publicKeyHex)
+            .addPublicKeys(ByteString.copyFrom(publicKeyBytes))
             .setIden(iden)
             .setNBio(0)
             .addAllAuthSigs(emptyList())
@@ -53,14 +55,13 @@ object ManageEnrollment {
 
         // 4) Sign the exact protobuf bytes
         val toSign = unsigned.toByteArray()
-        val signatureHex = Signing.encodeToHex(
-            Signing.regSigSign(keys.private, toSign)
-        )
+        val signatureBytes = Signing.regSigSign(keys.private, toSign)
+        val signatureHex = Signing.encodeToHex(signatureBytes)
         Log.d(TAG, "✍️ Signed proto bytes, signature=$signatureHex")
 
         // 5) Build the final signed request
         val req = unsigned.toBuilder()
-            .addAuthSigs(signatureHex)
+            .addAuthSigs(ByteString.copyFrom(signatureBytes))
             .build()
         Log.d(TAG, "📨 Built signed EnrollmentRequest")
 
