@@ -1,110 +1,120 @@
+// src/main/java/org/fossify/phone/helpers/Signing.kt
 package org.fossify.phone.helpers
 
+import org.bouncycastle.asn1.ASN1Primitive
+import org.bouncycastle.asn1.DERBitString
+import org.bouncycastle.asn1.DEROctetString
+import org.bouncycastle.asn1.pkcs.PrivateKeyInfo
+import org.bouncycastle.asn1.x509.AlgorithmIdentifier
+import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo
+import org.bouncycastle.internal.asn1.edec.EdECObjectIdentifiers
 import org.bouncycastle.jce.provider.BouncyCastleProvider
+import java.security.KeyFactory
 import java.security.KeyPair
 import java.security.KeyPairGenerator
 import java.security.PrivateKey
 import java.security.PublicKey
 import java.security.Security
 import java.security.Signature
+import java.security.spec.PKCS8EncodedKeySpec
+import java.security.spec.X509EncodedKeySpec
+import java.util.Base64
 
 /**
- * A helper object for handling Ed25519 cryptographic operations,
- * including key generation, signing, verification, and key exporting.
- * Also provides utilities for hex encoding and decoding.
+ * Helper for Ed25519 operations:
+ * - keygen, sign, verify
+ * - raw public/private key import & export (hex + Base64)
+ * - hex/Base64 encode-decode
  */
 object Signing {
-
-    private const val RS_ALGORITHM = "Ed25519"
-    private const val PROVIDER = "BC" // Use the Bouncy Castle provider
+    private const val ALGORITHM = "Ed25519"
+    private const val PROVIDER  = "BC"
 
     init {
         Security.removeProvider(PROVIDER)
         Security.insertProviderAt(BouncyCastleProvider(), 1)
     }
 
-    /**
-     * Generates a new Ed25519 key pair using the Bouncy Castle provider.
-     * This creates an in-memory key pair, not one stored in the Android KeyStore.
-     *
-     * @return A KeyPair object containing the public and private keys.
-     */
-    fun regSigKeygen(): KeyPair {
-        // FIX: Specify the "BC" provider to avoid using the AndroidKeyStore
-        val keyPairGenerator = KeyPairGenerator.getInstance(RS_ALGORITHM, PROVIDER)
-        return keyPairGenerator.generateKeyPair()
-    }
+    /** Generate a fresh Ed25519 keypair. */
+    fun regSigKeygen(): KeyPair =
+        KeyPairGenerator.getInstance(ALGORITHM, PROVIDER).generateKeyPair()
 
-    /**
-     * Signs a given message using a private key.
-     *
-     * @param privateKey The Ed25519 private key to use for signing.
-     * @param message The byte array of the message to be signed.
-     * @return A byte array representing the signature.
-     */
+    /** Sign raw message bytes. */
     fun regSigSign(privateKey: PrivateKey, message: ByteArray): ByteArray {
-        val signature = Signature.getInstance(RS_ALGORITHM, PROVIDER)
-        signature.initSign(privateKey)
-        signature.update(message)
-        return signature.sign()
+        val sig = Signature.getInstance(ALGORITHM, PROVIDER)
+        sig.initSign(privateKey)
+        sig.update(message)
+        return sig.sign()
     }
 
-    /**
-     * Verifies a signature against a message using a public key.
-     *
-     * @param publicKey The Ed25519 public key to use for verification.
-     * @param message The byte array of the original message.
-     * @param signature The byte array of the signature to verify.
-     * @return True if the signature is valid, false otherwise.
-     */
-    fun regSigVerify(publicKey: PublicKey, message: ByteArray, signature: ByteArray): Boolean {
-        val verifier = Signature.getInstance(RS_ALGORITHM, PROVIDER)
-        verifier.initVerify(publicKey)
+    /** Verify signature using raw 32-byte public key bytes. */
+    fun regSigVerify(publicKeyBytes: ByteArray, message: ByteArray, signatureBytes: ByteArray): Boolean {
+        val spki = SubjectPublicKeyInfo(
+            AlgorithmIdentifier(EdECObjectIdentifiers.id_Ed25519),
+            DERBitString(publicKeyBytes)
+        )
+        val keySpec = X509EncodedKeySpec(spki.encoded)
+        val pubKey = KeyFactory.getInstance(ALGORITHM, PROVIDER).generatePublic(keySpec)
+
+        val verifier = Signature.getInstance(ALGORITHM, PROVIDER)
+        verifier.initVerify(pubKey)
         verifier.update(message)
-        return verifier.verify(signature)
+        return verifier.verify(signatureBytes)
     }
 
-    /**
-     * Exports a public key to its standard X.509 format, encoded as a hex string.
-     *
-     * @param publicKey The PublicKey to export.
-     * @return The key as a hexadecimal string.
-     */
+    /** Extract and hex-encode the raw 32-byte Ed25519 public key. */
     fun exportPublicKeyToHexString(publicKey: PublicKey): String {
-        return encodeToString(publicKey.encoded)
+        val spki = SubjectPublicKeyInfo.getInstance(ASN1Primitive.fromByteArray(publicKey.encoded))
+        val raw = spki.publicKeyData.bytes
+        return encodeToHex(raw)
     }
 
-    /**
-     * Exports a private key to its standard PKCS#8 format, encoded as a hex string.
-     *
-     * @param privateKey The PrivateKey to export.
-     * @return The key as a hexadecimal string.
-     */
+    /** Extract and hex-encode the raw Ed25519 private key (seed). */
     fun exportPrivateKeyToHexString(privateKey: PrivateKey): String {
-        return encodeToString(privateKey.encoded)
+        val p8 = PrivateKeyInfo.getInstance(ASN1Primitive.fromByteArray(privateKey.encoded))
+        val raw = (p8.privateKeyAlgorithm.parameters as? DEROctetString)?.octets
+            ?: p8.parsePrivateKey().toASN1Primitive().encoded
+        return encodeToHex(raw)
     }
 
-    /**
-     * Encodes a byte array into a hexadecimal string.
-     *
-     * @param bytes The byte array to encode.
-     * @return The resulting hexadecimal string.
-     */
-    fun encodeToString(bytes: ByteArray): String {
-        return bytes.joinToString("") { "%02x".format(it) }
+    /** Import a raw 32-byte public key (hex) back into a PublicKey. */
+    fun importPublicKeyFromHex(hex: String): PublicKey {
+        val raw = decodeString(hex)
+        val spki = SubjectPublicKeyInfo(
+            AlgorithmIdentifier(EdECObjectIdentifiers.id_Ed25519),
+            DERBitString(raw)
+        )
+        val keySpec = X509EncodedKeySpec(spki.encoded)
+        return KeyFactory.getInstance(ALGORITHM, PROVIDER).generatePublic(keySpec)
     }
 
-    /**
-     * Decodes a hexadecimal string into a byte array.
-     *
-     * @param hexString The hexadecimal string to decode.
-     * @return The resulting byte array.
-     * @throws IllegalArgumentException if the hexString has an odd length or contains non-hex characters.
-     */
-    fun decodeString(hexString: String): ByteArray {
-        require(hexString.length % 2 == 0) { "Hex string must have an even length" }
-        return hexString.chunked(2)
-            .map { it.toInt(16).toByte() }
-            .toByteArray()
+    /** Import a raw Ed25519 private key (hex seed) back into a PrivateKey. */
+    fun importPrivateKeyFromHex(hex: String): PrivateKey {
+        val raw = decodeString(hex)
+        // wrap raw into PKCS#8 PrivateKeyInfo
+        val p8 = PrivateKeyInfo(
+            AlgorithmIdentifier(EdECObjectIdentifiers.id_Ed25519),
+            DEROctetString(raw)
+        )
+        val keySpec = PKCS8EncodedKeySpec(p8.encoded)
+        return KeyFactory.getInstance(ALGORITHM, PROVIDER).generatePrivate(keySpec)
     }
+
+    /** Encode to hex. */
+    fun encodeToHex(bytes: ByteArray): String =
+        bytes.joinToString("") { "%02x".format(it) }
+
+    /** Decode from hex. */
+    fun decodeString(hex: String): ByteArray {
+        require(hex.length % 2 == 0) { "Hex string must have even length" }
+        return hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+    }
+
+    /** Encode to Base64. */
+    fun encodeToBase64(bytes: ByteArray): String =
+        Base64.getEncoder().encodeToString(bytes)
+
+    /** Decode from Base64. */
+    fun decodeBase64(b64: String): ByteArray =
+        Base64.getDecoder().decode(b64)
 }

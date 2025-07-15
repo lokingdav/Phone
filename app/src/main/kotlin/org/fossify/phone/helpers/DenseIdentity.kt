@@ -24,6 +24,7 @@ object DenseIdentity {
         logoUrl: String,
         scope: CoroutineScope
     ) {
+        Log.d(TAG, "Enrolling new number: $phoneNumber")
         scope.launch(Dispatchers.IO) {
             ManageEnrollment.enroll(
                 phoneNumber   = phoneNumber,
