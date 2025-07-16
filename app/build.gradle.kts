@@ -185,6 +185,8 @@ dependencies {
     implementation("io.grpc:grpc-kotlin-stub:1.4.3")
 
     implementation("org.bouncycastle:bcprov-jdk18on:1.81")
+
+    implementation(files("libs/bbsgslib-release.aar"))
 }
 
 // Protobuf configuration block

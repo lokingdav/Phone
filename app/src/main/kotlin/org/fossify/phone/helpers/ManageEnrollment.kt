@@ -1,4 +1,3 @@
-// src/main/java/org/fossify/phone/helpers/ManageEnrollment.kt
 package org.fossify.phone.helpers
 
 import android.util.Log
@@ -9,6 +8,7 @@ import io.grpc.ManagedChannelBuilder
 import io.grpc.StatusRuntimeException
 import kotlinx.coroutines.coroutineScope
 import org.fossify.phone.BuildConfig
+import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -18,6 +18,7 @@ import java.util.concurrent.TimeUnit
  */
 object ManageEnrollment {
     private const val TAG = "DenseID-ManageEnrollment"
+    private const val PREFIX: String = "denseid"
 
     /**
      * Builds a signed EnrollmentRequest, performs two RPCs in sequence,
@@ -72,9 +73,42 @@ object ManageEnrollment {
         Log.d(TAG, "⚡ Calling ES2")
         val res2 = callServer(BuildConfig.DENSEID_ES2_HOST, BuildConfig.DENSEID_ES2_PORT, req, "ES2")
 
-        // 7) Consolidated logging
+        // 7) Finalize
+        finalizeEnrollment(
+            phoneNumber=phoneNumber,
+            displayName=displayName,
+            logoUrl=logoUrl,
+            publicKeyBytes=publicKeyBytes,
+            privateKeyBytes= Signing.exportPrivateKeyToBytes(keys.private),
+            records = listOf(res1, res2)
+        )
+    }
+
+    private fun finalizeEnrollment(
+        phoneNumber: String,
+        displayName: String,
+        logoUrl: String,
+        publicKeyBytes: ByteArray,
+        privateKeyBytes: ByteArray,
+        records: List<EnrollmentResult>
+    ) {
+        val enrollmentJson = JSONObject().apply {
+            put("phoneNumber",    phoneNumber)
+            put("displayName",    displayName)
+            put("logoUrl",        logoUrl)
+            put("publicKeyHex",   Signing.encodeToHex(publicKeyBytes))
+            put("privateKeyHex",  Signing.encodeToHex(privateKeyBytes))
+            put("eid",            records[0].eid)
+            put("sigma1Hex",      Signing.encodeToHex(records[0].sigma ?: ByteArray(0)))
+            put("sigma2Hex",      Signing.encodeToHex(records[1].sigma ?: ByteArray(0)))
+            put("uskHex",         Signing.encodeToHex(records[0].usk ?: ByteArray(0)))
+        }
+
+        val jsonString = enrollmentJson.toString()
+        DenseIdentityStore.putString("$PREFIX.enrollmentData", jsonString)
+
         Log.d(TAG, "✅ Both calls done, now logging results")
-        listOf(res1, res2).forEach { r ->
+        records.forEach { r ->
             if (r.success) {
                 Log.d(TAG, "[${r.label}] ✓ eid=${r.eid}")
             } else {
@@ -83,10 +117,32 @@ object ManageEnrollment {
         }
     }
 
+    fun getEnrollmentRecord() {
+        val enrollmentData = DenseIdentityStore.getString("$PREFIX.enrollmentData")
+        val enrollmentJson = JSONObject(enrollmentData ?: "{}")
+        val eid = enrollmentJson.getString("eid")
+        val usk = enrollmentJson.getString("uskHex")
+    }
+
+    data class EnrollmentRecords(
+        val phoneNumber: String,
+        val displayName: String,
+        val logoUrl: String,
+        val publicKeyBytes: ByteArray,
+        val privateKeyBytes: ByteArray,
+        val eid: String,
+        val usk: ByteArray,
+        val gpk: ByteArray,
+        val sigma: ByteArray
+    )
+
     private data class EnrollmentResult(
         val label: String,
         val success: Boolean,
         val eid: String? = null,
+        val usk: ByteArray? = null,
+        val gpk: ByteArray? = null,
+        val sigma: ByteArray? = null,
         val error: String? = null
     )
 

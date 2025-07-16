@@ -19,7 +19,7 @@ object DenseIdentityStore {
     }
 
     // String
-    fun putString(key: String, value: String) =
+    fun putString(key: String, value: String?) =
         prefs.edit().putString(key, value).apply()
 
     fun getString(key: String, default: String? = null): String? =
