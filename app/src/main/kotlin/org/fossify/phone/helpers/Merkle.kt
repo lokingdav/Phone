@@ -15,7 +15,7 @@ import java.util.Base64
  * - Typed proof with direction flags
  * - Built-in Java serialization (byte-array & Base64) for network transport
  */
-object MerkleTreeUtils {
+object Merkle {
     private const val LEAF_PREFIX: Byte = 0x00
     private const val NODE_PREFIX: Byte = 0x01
 

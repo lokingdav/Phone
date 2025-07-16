@@ -1,6 +1,7 @@
 // src/main/java/org/fossify/phone/helpers/Signing.kt
 package org.fossify.phone.helpers
 
+import io.github.denseidentity.bbsgroupsig.BBSGS
 import org.bouncycastle.asn1.ASN1Primitive
 import org.bouncycastle.asn1.DERBitString
 import org.bouncycastle.asn1.DEROctetString
@@ -19,6 +20,7 @@ import java.security.Signature
 import java.security.spec.PKCS8EncodedKeySpec
 import java.security.spec.X509EncodedKeySpec
 import java.util.Base64
+import java.security.SignatureException
 
 /**
  * Helper for Ed25519 operations:
@@ -102,7 +104,7 @@ object Signing {
         bytes.joinToString("") { "%02x".format(it) }
 
     /** Decode from hex. */
-    fun decodeString(hex: String): ByteArray {
+    fun decodeHex(hex: String): ByteArray {
         require(hex.length % 2 == 0) { "Hex string must have even length" }
         return hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
     }
@@ -114,4 +116,67 @@ object Signing {
     /** Decode from Base64. */
     fun decodeBase64(b64: String): ByteArray =
         Base64.getDecoder().decode(b64)
+
+    /**
+     * Initialize the pairing operation for BBS group signatures.
+     */
+    fun initGroupSignatures() {
+        BBSGS.bbs04InitPairing()
+    }
+
+    /**
+     * Generate a unique user secret key given the group public key (gpk) and issuer secret key (isk).
+     *
+     * @throws SignatureException if the underlying native call fails
+     */
+    @Throws(SignatureException::class)
+    fun grpSigUserKeyGen(gpk: ByteArray, isk: ByteArray): ByteArray = try {
+        BBSGS.bbs04UserKeygen(gpk, isk)
+    } catch (e: Exception) {
+        throw SignatureException("grpSigUserKeyGen failed", e)
+    }
+
+    /**
+     * Sign a message under the group public key (gpk) with the user secret key (usk).
+     *
+     * @throws SignatureException if the underlying native call fails
+     */
+    @Throws(SignatureException::class)
+    fun grpSigSign(gpk: ByteArray, usk: ByteArray, msg: ByteArray): ByteArray = try {
+        BBSGS.bbs04Sign(gpk, usk, msg)
+    } catch (e: Exception) {
+        throw SignatureException("grpSigSign failed", e)
+    }
+
+    /**
+     * Verify a signature on a message under the group public key (gpk).
+     * Returns false if verification fails or if an error occurs.
+     */
+    fun grpSigVerify(gpk: ByteArray, sig: ByteArray, msg: ByteArray): Boolean = try {
+        BBSGS.bbs04Verify(gpk, sig, msg)
+    } catch (_: Exception) {
+        false
+    }
+
+    /**
+     * Verify user secret key under the group public key (gpk).
+     * Returns false if verification fails or if an error occurs.
+     */
+    fun grpSigVerifyUsk(gpk: ByteArray, usk: ByteArray): Boolean = try {
+        BBSGS.bbs04VerifyUsk(gpk, usk)
+    } catch (_: Exception) {
+        false
+    }
+
+    /**
+     * Open (deanonymize) a signature to reveal the signer, using the opening secret key (osk).
+     *
+     * @throws SignatureException if the underlying native call fails
+     */
+    @Throws(SignatureException::class)
+    fun grpSigOpenSig(gpk: ByteArray, osk: ByteArray, sig: ByteArray): ByteArray = try {
+        BBSGS.bbs04Open(gpk, osk, sig)
+    } catch (e: Exception) {
+        throw SignatureException("grpSigOpenSig failed", e)
+    }
 }

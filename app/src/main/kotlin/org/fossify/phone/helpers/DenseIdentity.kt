@@ -8,6 +8,11 @@ import kotlinx.coroutines.launch
 
 object DenseIdentity {
     private const val TAG = "DenseIdentity"
+    private lateinit var callState: DenseIdentityCallState
+
+    fun init(state: DenseIdentityCallState) {
+        callState = state
+    }
 
     /**
      * Generates a signing keypair, exports the public key to hex,

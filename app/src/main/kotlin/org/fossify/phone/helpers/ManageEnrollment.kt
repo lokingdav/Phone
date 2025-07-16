@@ -8,7 +8,6 @@ import io.grpc.ManagedChannelBuilder
 import io.grpc.StatusRuntimeException
 import kotlinx.coroutines.coroutineScope
 import org.fossify.phone.BuildConfig
-import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -68,19 +67,30 @@ object ManageEnrollment {
 
         // 6) Sequential calls
         Log.d(TAG, "⚡ Calling ES1")
-        val res1 = callServer(BuildConfig.DENSEID_ES1_HOST, BuildConfig.DENSEID_ES1_PORT, req, "ES1")
+        val es1Res = callServer(
+            BuildConfig.DENSEID_ES1_HOST,
+            BuildConfig.DENSEID_ES1_PORT,
+            req, "ES1"
+        )
 
         Log.d(TAG, "⚡ Calling ES2")
-        val res2 = callServer(BuildConfig.DENSEID_ES2_HOST, BuildConfig.DENSEID_ES2_PORT, req, "ES2")
+        val es2Res = callServer(
+            BuildConfig.DENSEID_ES2_HOST,
+            BuildConfig.DENSEID_ES2_PORT,
+            req, "ES2"
+        )
 
         // 7) Finalize
         finalizeEnrollment(
-            phoneNumber=phoneNumber,
-            displayName=displayName,
-            logoUrl=logoUrl,
-            publicKeyBytes=publicKeyBytes,
-            privateKeyBytes= Signing.exportPrivateKeyToBytes(keys.private),
-            records = listOf(res1, res2)
+            phoneNumber,
+            displayName,
+            logoUrl,
+            nonce,
+            0,
+            es1Res,
+            es2Res,
+            publicKeyBytes,
+            Signing.exportPrivateKeyToBytes(keys.private)
         )
     }
 
@@ -88,70 +98,70 @@ object ManageEnrollment {
         phoneNumber: String,
         displayName: String,
         logoUrl: String,
+        nonce: String,
+        nBio: Int,
+        es1: Enrollment.EnrollmentResponse,
+        es2: Enrollment.EnrollmentResponse,
         publicKeyBytes: ByteArray,
-        privateKeyBytes: ByteArray,
-        records: List<EnrollmentResult>
+        privateKeyBytes: ByteArray
     ) {
-        val enrollmentJson = JSONObject().apply {
-            put("phoneNumber",    phoneNumber)
-            put("displayName",    displayName)
-            put("logoUrl",        logoUrl)
-            put("publicKeyHex",   Signing.encodeToHex(publicKeyBytes))
-            put("privateKeyHex",  Signing.encodeToHex(privateKeyBytes))
-            put("eid",            records[0].eid)
-            put("sigma1Hex",      Signing.encodeToHex(records[0].sigma ?: ByteArray(0)))
-            put("sigma2Hex",      Signing.encodeToHex(records[1].sigma ?: ByteArray(0)))
-            put("uskHex",         Signing.encodeToHex(records[0].usk ?: ByteArray(0)))
+        val state = DenseIdentityCallState(
+            phoneNumber,
+            displayName,
+            logoUrl,
+            nBio,
+            nonce,
+
+            es1.eid,
+            es2.exp,
+            es1.sigma.toByteArray(),
+            es2.sigma.toByteArray(),
+
+            publicKeyBytes,
+            privateKeyBytes,
+
+            es1.usk.toByteArray(),
+            es1.gpk.toByteArray(),
+        )
+
+        if (Signing.grpSigVerifyUsk(state.groupPk, state.userSk)) {
+            throw Exception("User Secret Key is Malformed")
         }
 
-        val jsonString = enrollmentJson.toString()
-        DenseIdentityStore.putString("$PREFIX.enrollmentData", jsonString)
-
-        Log.d(TAG, "✅ Both calls done, now logging results")
-        records.forEach { r ->
-            if (r.success) {
-                Log.d(TAG, "[${r.label}] ✓ eid=${r.eid}")
-            } else {
-                Log.e(TAG, "[${r.label}] ✗ error=${r.error}")
-            }
+        val expectedEid = Signing.encodeToHex(Merkle.createRoot(state.getCommitmentAttributes()))
+        if (state.eId != expectedEid) {
+            throw Exception("Eid Check fails")
         }
+
+        val enMsg = Enrollment.EnrollmentResponse.newBuilder()
+            .setEid(expectedEid)
+            .setExp(es1.exp)
+            .build()
+            .toByteArray()
+
+        if (Signing.regSigVerify(
+                es1.publicKey.toByteArray(),
+                enMsg,
+                es1.sigma.toByteArray())) {
+            throw Exception("Enrollment signature failed to verify under Registrar 1")
+        }
+
+        if (Signing.regSigVerify(
+                es2.publicKey.toByteArray(),
+                enMsg,
+                es2.sigma.toByteArray())) {
+            throw Exception("Enrollment signature failed to verify under Registrar 2")
+        }
+
+        state.save()
     }
-
-    fun getEnrollmentRecord() {
-        val enrollmentData = DenseIdentityStore.getString("$PREFIX.enrollmentData")
-        val enrollmentJson = JSONObject(enrollmentData ?: "{}")
-        val eid = enrollmentJson.getString("eid")
-        val usk = enrollmentJson.getString("uskHex")
-    }
-
-    data class EnrollmentRecords(
-        val phoneNumber: String,
-        val displayName: String,
-        val logoUrl: String,
-        val publicKeyBytes: ByteArray,
-        val privateKeyBytes: ByteArray,
-        val eid: String,
-        val usk: ByteArray,
-        val gpk: ByteArray,
-        val sigma: ByteArray
-    )
-
-    private data class EnrollmentResult(
-        val label: String,
-        val success: Boolean,
-        val eid: String? = null,
-        val usk: ByteArray? = null,
-        val gpk: ByteArray? = null,
-        val sigma: ByteArray? = null,
-        val error: String? = null
-    )
 
     private fun callServer(
         host: String,
         port: Int,
         req: Enrollment.EnrollmentRequest,
         label: String
-    ): EnrollmentResult {
+    ): Enrollment.EnrollmentResponse {
         Log.d(TAG, "↪ callServer($label) → $host:$port")
         val channel = ManagedChannelBuilder
             .forAddress(host, port)
@@ -161,14 +171,14 @@ object ManageEnrollment {
         val stub = EnrollmentServiceGrpc.newBlockingStub(channel)
             .withDeadlineAfter(5, TimeUnit.SECONDS)
 
-        return try {
+        try {
             Log.d(TAG, "⏳ [$label] sending RPC")
             val resp = stub.enrollSubscriber(req)
             Log.d(TAG, "✔️ [$label] got eid=${resp.eid}")
-            EnrollmentResult(label, true, eid = resp.eid)
+            return resp
         } catch (e: StatusRuntimeException) {
             Log.e(TAG, "⚠️ [$label] RPC failed: ${e.status}", e)
-            EnrollmentResult(label, false, error = e.status.toString())
+            throw e
         } finally {
             channel.shutdownNow()
             Log.d(TAG, "↩ callServer($label) channel shutdown")
