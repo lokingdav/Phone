@@ -3,7 +3,7 @@ package org.fossify.phone.denseid
 import android.util.Log
 import org.json.JSONObject
 
-private const val delimiter = "."
+private const val TAG = "Dense Identity"
 
 enum class KeyLabel(val code: String) {
     DID("DId"),
@@ -22,24 +22,24 @@ data class UserState(
     val groupKeys: GroupKeys
 ) {
     fun getCommitmentAttributes(): List<String> {
-        val rawPk = Signing.toRawPublicKey(keyPair.public)
         val attributes: List<String> = listOf(
             display.phoneNumber,
-            display.name, display.logoUrl,
+            display.name,
+            display.logoUrl,
             misc.nBio.toString(),
             misc.nonce.toString(),
-            Signing.encodeToHex(rawPk)
+            Signing.encodeToHex(keyPair.public.encoded)
         )
         return attributes
     }
 
     fun save() {
         val enrollmentJson = JSONObject().apply {
-            put(KeyLabel.DISPLAY_INFO.code, display)
-            put(KeyLabel.MISC_INFO.code,misc)
-            put(KeyLabel.ENROLLED_CRED.code,enrollmentCred)
-            put(KeyLabel.KEY_PAIR.code,keyPair)
-            put(KeyLabel.GROUP_KEYS.code,groupKeys)
+            put(KeyLabel.DISPLAY_INFO.code, display.toJson())
+            put(KeyLabel.MISC_INFO.code,misc.toJson())
+            put(KeyLabel.ENROLLED_CRED.code,enrollmentCred.toJson())
+            put(KeyLabel.KEY_PAIR.code,keyPair.toJson())
+            put(KeyLabel.GROUP_KEYS.code,groupKeys.toJson())
         }
         val data = enrollmentJson.toString()
         Log.d("Dense Identity", "Saving $data")
@@ -54,19 +54,21 @@ data class UserState(
             }
 
             val data = JSONObject(dataStr)
-            val displayInfo = data.getString(KeyLabel.DISPLAY_INFO.code)
-            val miscInfo = data.getString(KeyLabel.MISC_INFO.code)
-            val enrollmentCred = data.getString(KeyLabel.ENROLLED_CRED.code)
-            val keyPair = data.getString(KeyLabel.KEY_PAIR.code)
-            val groupKeys = data.getString(KeyLabel.GROUP_KEYS.code)
 
-            return UserState(
-                display=DisplayInfo.fromString(displayInfo),
-                misc=MiscInfo.fromString(miscInfo),
-                enrollmentCred=Credential.fromString(enrollmentCred),
-                keyPair=MyKeyPair.fromString(keyPair),
-                groupKeys=GroupKeys.fromString(groupKeys)
-            )
+            try {
+                val state = UserState(
+                    display=DisplayInfo.fromJson(data.getJSONObject(KeyLabel.DISPLAY_INFO.code)),
+                    misc=MiscInfo.fromJson(data.getJSONObject(KeyLabel.MISC_INFO.code)),
+                    enrollmentCred=Credential.fromJson(data.getJSONObject(KeyLabel.ENROLLED_CRED.code)),
+                    keyPair=MyKeyPair.fromJson(data.getJSONObject(KeyLabel.KEY_PAIR.code)),
+                    groupKeys=GroupKeys.fromJson(data.getJSONObject(KeyLabel.GROUP_KEYS.code))
+                )
+                return state
+            } catch (e: Exception) {
+                Log.e(TAG,"Failed to Load $TAG state", e)
+            }
+
+            return null
         }
     }
 }

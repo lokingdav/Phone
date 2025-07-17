@@ -44,7 +44,7 @@ object ManageEnrollment {
         val nonce = UUID.randomUUID().toString()
         val unsigned = Enrollment.EnrollmentRequest.newBuilder()
             .setTn(phoneNumber)
-            .addPublicKeys(ByteString.copyFrom(Signing.toRawPublicKey(keypair.public)))
+            .addPublicKeys(ByteString.copyFrom(keypair.public.encoded))
             .setIden(iden)
             .setNBio(0)
             .addAllAuthSigs(emptyList())
@@ -115,17 +115,18 @@ object ManageEnrollment {
         if (!groupKeys.verifyUsk()) {
             throw Exception("User Secret Key is Malformed")
         }
+        Log.d(TAG, "\t✅ Valid")
 
         Log.d(TAG, "Constructing User State Object...")
         val display = DisplayInfo(phoneNumber, displayName, logoUrl)
         val miscInfo = MiscInfo(nBio, nonce)
-        val ra1sig = Signature(
+        val ra1sig = RsSignature(
             es1.sigma.toByteArray(),
-            Signing.fromRawPublicKey(es1.publicKey.toByteArray())
+            Signing.decodePublicKey(es1.publicKey.toByteArray())
         )
-        val ra2sig = Signature(
+        val ra2sig = RsSignature(
             es2.sigma.toByteArray(),
-            Signing.fromRawPublicKey(es2.publicKey.toByteArray())
+            Signing.decodePublicKey(es2.publicKey.toByteArray())
         )
         val enrollmentCred = Credential(es1.eid, es2.exp, ra1sig, ra2sig)
         val myKeyPair = MyKeyPair(keypair)
@@ -137,16 +138,26 @@ object ManageEnrollment {
             myKeyPair,
             groupKeys
         )
+        Log.d(TAG, "\t✅ Success!")
 
         Log.d(TAG, "Validating Enrollment ID...")
+        if (es1.eid != es2.eid) {
+            throw Exception("Eid from ES1 and ES2 are different")
+        }
         val expectedEid = Signing.encodeToHex(Merkle.createRoot(state.getCommitmentAttributes()))
         if (state.enrollmentCred.eId != expectedEid) {
-            throw Exception("Eid Check fails")
+            throw Exception("Expected Eid does not match the computed value")
+        }
+        Log.d(TAG, "\t✅ Valid!")
+
+        Log.d(TAG, "Validating Expiration Field...")
+        if (es1.exp != es2.exp) {
+            throw Exception("Expiration fields must match for both RA1 and RA2")
         }
 
         val enMsg = Enrollment.EnrollmentResponse.newBuilder()
             .setEid(expectedEid)
-            .setExp(es1.exp)
+            .setExp(es1.exp) // since exp match, either es1.exp or es2.exp suffice
             .build()
             .toByteArray()
 
@@ -154,14 +165,17 @@ object ManageEnrollment {
         if (!state.enrollmentCred.ra1Sig.verify(enMsg)) {
             throw Exception("Enrollment signature failed to verify under Registrar 1")
         }
+        Log.d(TAG, "\t✅ Valid!")
 
         Log.d(TAG, "Verifying Enrollment Credential from Registrar 2...")
         if (!state.enrollmentCred.ra2Sig.verify(enMsg)) {
             throw Exception("Enrollment signature failed to verify under Registrar 2")
         }
+        Log.d(TAG, "\t✅ Valid!")
 
         Log.d(TAG, "Saving State...")
         state.save()
+        Log.d(TAG, "\t✅ Saved!")
 
         Log.d(TAG, "✅ Enrollment complete, eid=${state.enrollmentCred.eId}")
     }

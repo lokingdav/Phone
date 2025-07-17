@@ -1,38 +1,28 @@
 package org.fossify.phone.denseid
 
+import org.json.JSONObject
 import java.security.PublicKey
 
-private const val delimiter = "."
-
-class Signature {
-    var signature: ByteArray
-    var publicKey: PublicKey
-
-    constructor(signature: ByteArray, publicKey: PublicKey) {
-        this.signature = signature
-        this.publicKey = publicKey
-    }
-
-    constructor(signature: ByteArray, publicKey: ByteArray) {
-        this.signature = signature
-        this.publicKey = Signing.decodePublicKey(publicKey)
-    }
-
-    constructor(str: String) {
-        val parts = str.split(delimiter)
-        val pkHex = parts[0]
-        val sigHex = parts[1]
-        this.publicKey = Signing.decodePublicKey(Signing.decodeHex(pkHex))
-        this.signature = Signing.decodeHex(sigHex)
-    }
-
+data class RsSignature(val signature: ByteArray, val publicKey: PublicKey) {
     fun verify(message: ByteArray): Boolean {
         return Signing.regSigVerify(publicKey, signature, message)
     }
 
-    override fun toString(): String {
-        val pkHex: String = Signing.encodeToHex(publicKey.encoded)
-        val sigHex: String = Signing.encodeToHex(signature)
-        return "$pkHex.$sigHex"
+    fun toJson(): JSONObject {
+        val data = JSONObject().apply {
+            put("pk", Signing.encodeToHex(publicKey.encoded))
+            put("sg", Signing.encodeToHex(signature))
+        }
+        return data
+    }
+
+    companion object {
+        fun fromJson(data: JSONObject): RsSignature {
+            val pkBytes = Signing.decodeHex(data.getString("pk"))
+            return RsSignature(
+                Signing.decodeHex(data.getString("sg")),
+                Signing.decodePublicKey(pkBytes)
+            )
+        }
     }
 }

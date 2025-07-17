@@ -1,34 +1,45 @@
 package org.fossify.phone.denseid
 
+import android.util.Log
 import com.google.protobuf.Timestamp
-
-private const val delimiter = "||"
+import org.json.JSONObject
 
 data class DisplayInfo(
     val phoneNumber: String,
     val name: String,
     val logoUrl: String
 ) {
-    override fun toString(): String {
-        return "$phoneNumber$delimiter$name$delimiter$logoUrl"
+    fun toJson(): JSONObject {
+        val data = JSONObject().apply {
+            put("pn", phoneNumber)
+            put("nm", name)
+            put("lg", logoUrl)
+        }
+        return data
     }
 
     companion object {
-        fun fromString(str: String): DisplayInfo {
-            val parts = str.split(delimiter)
-            return DisplayInfo(parts[0], parts[1], parts[2])
+        fun fromJson(data: JSONObject): DisplayInfo {
+            return DisplayInfo(
+                data.getString("pn"),
+                data.getString("nm"),
+                data.getString("lg")
+            )
         }
     }
 }
 
 data class MiscInfo(val nBio: Int, val nonce: String) {
-    override fun toString(): String {
-        return "$nBio$delimiter$nonce"
+    fun toJson(): JSONObject {
+        val misc = JSONObject().apply {
+            put("nb", nBio)
+            put("nc", nonce)
+        }
+        return misc
     }
     companion object {
-        fun fromString(str: String): MiscInfo {
-            val parts = str.split(delimiter)
-            return MiscInfo(parts[0].toInt(), parts[1])
+        fun fromJson(data: JSONObject): MiscInfo {
+            return MiscInfo(data.getInt("nb"), data.getString("nc"))
         }
     }
 }
@@ -36,24 +47,30 @@ data class MiscInfo(val nBio: Int, val nonce: String) {
 data class Credential(
     val eId: String,
     val eExp: Timestamp,
-    val ra1Sig: Signature,
-    val ra2Sig: Signature
+    val ra1Sig: RsSignature,
+    val ra2Sig: RsSignature
 ) {
-    override fun toString(): String {
+    fun toJson(): JSONObject {
         val exp = Signing.encodeToHex(eExp.toByteArray())
-        return "$eId$delimiter$exp$delimiter$ra1Sig$delimiter$ra2Sig"
+
+        val data = JSONObject().apply {
+            put("ei", eId)
+            put("ex", exp)
+            put("r1", ra1Sig.toJson())
+            put("r2", ra2Sig.toJson())
+        }
+
+        return data
     }
 
     companion object {
-        fun fromString(str: String): Credential {
-            val parts = str.split(delimiter)
-            val exp = Signing.decodeHex(parts[1])
-            val ra1Sig = Signature(parts[2])
-            val ra2Sig = Signature(parts[3])
+        fun fromJson(data: JSONObject): Credential {
+            val exp = Signing.decodeHex(data.getString("ex"))
             return Credential(
-                parts[0],
+                data.getString("ei"),
                 Timestamp.parseFrom(exp),
-                ra1Sig, ra2Sig
+                RsSignature.fromJson(data.getJSONObject("r1")),
+                RsSignature.fromJson(data.getJSONObject("r2")),
             )
         }
     }

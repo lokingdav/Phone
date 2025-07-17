@@ -8,10 +8,10 @@ import kotlinx.coroutines.launch
 
 object DenseIdentityService {
     private const val TAG = "DenseIdentity"
-    private lateinit var callState: UserState
+    private var userState: UserState? = null
 
-    fun init(state: UserState) {
-        callState = state
+    fun init(state: UserState?) {
+        userState = state
     }
 
     /**

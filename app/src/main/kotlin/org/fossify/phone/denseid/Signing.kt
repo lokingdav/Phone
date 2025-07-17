@@ -49,31 +49,12 @@ object Signing {
         return verifier.verify(signature)
     }
 
-    /** Extract and hex-encode the raw 32-byte Ed25519 public key. */
-    fun toRawPublicKey(publicKey: PublicKey): ByteArray {
-        val spki = SubjectPublicKeyInfo
-            .getInstance(ASN1Primitive.fromByteArray(publicKey.encoded))
-        return spki.publicKeyData.bytes
-    }
-
-    fun fromRawPublicKey(rawKeyBytes: ByteArray): PublicKey {
-        val spki = SubjectPublicKeyInfo(
-            AlgorithmIdentifier(EdECObjectIdentifiers.id_Ed25519),
-            DERBitString(rawKeyBytes)
-        )
-        val der = spki.encoded
-        val spec = X509EncodedKeySpec(der)
-        return KeyFactory
-            .getInstance(ALGORITHM, PROVIDER)
-            .generatePublic(spec)
-    }
-
     /**
      * Decode a DER-encoded X.509 SubjectPublicKeyInfo (SPKI) blob
      * back into a PublicKey (Bouncy-Castle’s BCEdDSAPublicKey under the hood).
      */
-    fun decodePublicKey(spkiDer: ByteArray): PublicKey {
-        val spec = X509EncodedKeySpec(spkiDer)
+    fun decodePublicKey(encoded: ByteArray): PublicKey {
+        val spec = X509EncodedKeySpec(encoded)
         return KeyFactory
             .getInstance(ALGORITHM, PROVIDER)
             .generatePublic(spec)

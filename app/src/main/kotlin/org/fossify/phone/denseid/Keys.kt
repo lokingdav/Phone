@@ -1,45 +1,37 @@
 package org.fossify.phone.denseid
 
+import org.json.JSONObject
 import java.security.KeyPair
 import java.security.PrivateKey
 import java.security.PublicKey
 
-private const val delimiter = "."
+data class GPK(val encoded: ByteArray);
+data class USK(val encoded: ByteArray);
 
 data class GroupKeys(val usk: USK, val gpk: GPK) {
     fun verifyUsk(): Boolean {
         return Signing.grpSigVerifyUsk(gpk.encoded, usk.encoded)
     }
 
-    override fun toString(): String {
-        return "${usk}${delimiter}${gpk}"
+    fun verifySignature(signature: ByteArray, msg: ByteArray): Boolean {
+        return Signing.grpSigVerify(gpk.encoded, signature, msg)
     }
 
-    companion object {
-        fun fromString(str: String): GroupKeys {
-            val parts = str.split(delimiter)
-            return GroupKeys(USK.fromString(parts[0]), GPK.fromString(parts[1]))
+    fun toJson(): JSONObject {
+        val data = JSONObject().apply {
+            put("uk", Signing.encodeToHex(usk.encoded))
+            put("pk", Signing.encodeToHex(gpk.encoded))
         }
+        return data
     }
-}
-
-open class GPK(open val encoded: ByteArray) {
-    override fun toString(): String =
-        Signing.encodeToHex(encoded)
 
     companion object {
-        /** Parse a GPK (raw bytes) from its hex form. */
-        fun fromString(str: String): GPK =
-            GPK(Signing.decodeHex(str))
-    }
-}
-
-data class USK(
-    override val encoded: ByteArray
-) : GPK(encoded) {
-    companion object {
-        fun fromString(str: String): USK =
-            USK(Signing.decodeHex(str))
+        fun fromJson(data: JSONObject): GroupKeys {
+            return GroupKeys(
+                USK(Signing.decodeHex(data.getString("uk"))),
+                GPK(Signing.decodeHex(data.getString("pk")))
+            )
+        }
     }
 }
 
@@ -49,18 +41,23 @@ data class MyKeyPair(
 ) {
     constructor(keypair: KeyPair): this(keypair.public, keypair.private);
 
-    override fun toString(): String {
-        val pk = Signing.encodeToHex(public.encoded)
-        val sk = Signing.encodeToHex(private.encoded)
-        return "$pk$delimiter$sk"
+    fun toJson(): JSONObject {
+        val data = JSONObject().apply {
+            put("pk", Signing.encodeToHex(public.encoded))
+            put("sk", Signing.encodeToHex(private.encoded))
+        }
+
+        return data
     }
 
     companion object {
-        fun fromString(str: String): MyKeyPair {
-            val parts = str.split(delimiter)
-            val pk = Signing.decodePublicKey(Signing.decodeHex(parts[0]))
-            val sk = Signing.decodePrivateKey(Signing.decodeHex(parts[1]))
-            return MyKeyPair(pk, sk)
+        fun fromJson(data: JSONObject): MyKeyPair {
+            val pk = Signing.decodeHex(data.getString("pk"))
+            val sk = Signing.decodeHex(data.getString("sk"))
+            return MyKeyPair(
+                Signing.decodePublicKey(pk),
+                Signing.decodePrivateKey(sk)
+            )
         }
     }
 }
