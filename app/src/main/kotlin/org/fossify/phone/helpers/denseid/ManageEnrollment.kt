@@ -1,4 +1,4 @@
-package org.fossify.phone.helpers
+package org.fossify.phone.helpers.denseid
 
 import android.util.Log
 import com.google.protobuf.ByteString
@@ -8,6 +8,7 @@ import io.grpc.ManagedChannelBuilder
 import io.grpc.StatusRuntimeException
 import kotlinx.coroutines.coroutineScope
 import org.fossify.phone.BuildConfig
+import java.security.KeyPair
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -31,10 +32,7 @@ object ManageEnrollment {
         Log.d(TAG, "▶ enroll() start for $phoneNumber")
 
         // 1) Generate signing keypair
-        val keys = Signing.regSigKeygen()
-        val publicKeyBytes = Signing.exportPublicKeysToBytes(keys.public)
-        val publicKeyHex = Signing.encodeToHex(publicKeyBytes)
-        Log.d(TAG, "🔑 Generated key, pubHex=$publicKeyHex")
+        val keypair = Signing.regSigKeygen()
 
         // 2) Build the DisplayInformation message
         val iden = Enrollment.DisplayInformation.newBuilder()
@@ -46,7 +44,7 @@ object ManageEnrollment {
         val nonce = UUID.randomUUID().toString()
         val unsigned = Enrollment.EnrollmentRequest.newBuilder()
             .setTn(phoneNumber)
-            .addPublicKeys(ByteString.copyFrom(publicKeyBytes))
+            .addPublicKeys(ByteString.copyFrom(Signing.toRawPublicKey(keypair.public)))
             .setIden(iden)
             .setNBio(0)
             .addAllAuthSigs(emptyList())
@@ -55,7 +53,7 @@ object ManageEnrollment {
 
         // 4) Sign the exact protobuf bytes
         val toSign = unsigned.toByteArray()
-        val signatureBytes = Signing.regSigSign(keys.private, toSign)
+        val signatureBytes = Signing.regSigSign(keypair.private, toSign)
         val signatureHex = Signing.encodeToHex(signatureBytes)
         Log.d(TAG, "✍️ Signed proto bytes, signature=$signatureHex")
 
@@ -90,10 +88,9 @@ object ManageEnrollment {
                 0,
                 es1Res,
                 es2Res,
-                publicKeyBytes,
-                Signing.exportPrivateKeyToBytes(keys.private)
+                keypair
             )
-            Log.d(TAG,"Enrollment Complete. Happy Calling")
+            Log.d(TAG, "Enrollment Complete. Happy Calling")
         } catch (e: Exception) {
             val msg = "❌ Enrollment failed: ${e.message}"
             Log.e(TAG, msg, e)
@@ -108,31 +105,40 @@ object ManageEnrollment {
         nBio: Int,
         es1: Enrollment.EnrollmentResponse,
         es2: Enrollment.EnrollmentResponse,
-        publicKeyBytes: ByteArray,
-        privateKeyBytes: ByteArray
+        keypair: KeyPair
     ) {
-        val state = DenseIdentityCallState(
-            phoneNumber,
-            displayName,
-            logoUrl,
-            nBio,
-            nonce,
-
-            es1.eid,
-            es2.exp,
-            es1.sigma.toByteArray(),
-            es2.sigma.toByteArray(),
-
-            publicKeyBytes,
-            privateKeyBytes,
-
-            es1.usk.toByteArray(),
-            es1.gpk.toByteArray(),
+        val groupKeys = GroupKeys(
+            USK(es1.usk.toByteArray()),
+            GPK(es1.gpk.toByteArray())
         )
 
-        if (!Signing.grpSigVerifyUsk(state.groupPk, state.userSk)) {
+        if (!groupKeys.verifyUsk()) {
             throw Exception("User Secret Key is Malformed")
         }
+
+        val display = DisplayInfo(phoneNumber, displayName, logoUrl)
+        val miscInfo = MiscInfo(nBio, nonce)
+        val ra1sig = Signature(
+            es1.sigma.toByteArray(),
+            Signing.fromRawPublicKey(es1.publicKey.toByteArray())
+        )
+        val ra2sig = Signature(
+            es2.sigma.toByteArray(),
+            Signing.fromRawPublicKey(es2.publicKey.toByteArray())
+        )
+        val enrollmentCred = Credential(es1.eid, es2.exp, ra1sig, ra2sig)
+        val myKeyPair = MyKeyPair(keypair)
+
+
+        val state = UserState(
+            display,
+            miscInfo,
+            enrollmentCred,
+            myKeyPair,
+            groupKeys
+        )
+
+
 
         val expectedEid = Signing.encodeToHex(Merkle.createRoot(state.getCommitmentAttributes()))
         if (state.eId != expectedEid) {

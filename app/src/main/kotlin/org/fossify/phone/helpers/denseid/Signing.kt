@@ -1,12 +1,9 @@
-// src/main/java/org/fossify/phone/helpers/Signing.kt
-package org.fossify.phone.helpers
+package org.fossify.phone.helpers.denseid
 
 import android.util.Log
 import io.github.denseidentity.bbsgroupsig.BBSGS
 import org.bouncycastle.asn1.ASN1Primitive
 import org.bouncycastle.asn1.DERBitString
-import org.bouncycastle.asn1.DEROctetString
-import org.bouncycastle.asn1.pkcs.PrivateKeyInfo
 import org.bouncycastle.asn1.x509.AlgorithmIdentifier
 import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo
 import org.bouncycastle.internal.asn1.edec.EdECObjectIdentifiers
@@ -18,17 +15,11 @@ import java.security.PrivateKey
 import java.security.PublicKey
 import java.security.Security
 import java.security.Signature
+import java.security.SignatureException
 import java.security.spec.PKCS8EncodedKeySpec
 import java.security.spec.X509EncodedKeySpec
-import java.util.Base64
-import java.security.SignatureException
 
-/**
- * Helper for Ed25519 operations:
- * - keygen, sign, verify
- * - raw public/private key import & export (hex + Base64)
- * - hex/Base64 encode-decode
- */
+
 object Signing {
     private const val ALGORITHM = "Ed25519"
     private const val PROVIDER  = "BC"
@@ -51,54 +42,52 @@ object Signing {
         return sig.sign()
     }
 
-    /** Verify signature using raw 32-byte public key bytes. */
-    fun regSigVerify(publicKeyBytes: ByteArray, message: ByteArray, signatureBytes: ByteArray): Boolean {
-        val spki = SubjectPublicKeyInfo(
-            AlgorithmIdentifier(EdECObjectIdentifiers.id_Ed25519),
-            DERBitString(publicKeyBytes)
-        )
-        val keySpec = X509EncodedKeySpec(spki.encoded)
-        val pubKey = KeyFactory.getInstance(ALGORITHM, PROVIDER).generatePublic(keySpec)
-
+    fun regSigVerify(publicKey: PublicKey, signature: ByteArray, message: ByteArray): Boolean {
         val verifier = Signature.getInstance(ALGORITHM, PROVIDER)
-        verifier.initVerify(pubKey)
+        verifier.initVerify(publicKey)
         verifier.update(message)
-        return verifier.verify(signatureBytes)
+        return verifier.verify(signature)
     }
 
     /** Extract and hex-encode the raw 32-byte Ed25519 public key. */
-    fun exportPublicKeysToBytes(publicKey: PublicKey): ByteArray {
-        val spki = SubjectPublicKeyInfo.getInstance(ASN1Primitive.fromByteArray(publicKey.encoded))
+    fun toRawPublicKey(publicKey: PublicKey): ByteArray {
+        val spki = SubjectPublicKeyInfo
+            .getInstance(ASN1Primitive.fromByteArray(publicKey.encoded))
         return spki.publicKeyData.bytes
     }
 
-    /** Extract and hex-encode the raw Ed25519 private key (seed). */
-    fun exportPrivateKeyToBytes(privateKey: PrivateKey): ByteArray {
-        val p8 = PrivateKeyInfo.getInstance(ASN1Primitive.fromByteArray(privateKey.encoded))
-        val raw = (p8.privateKeyAlgorithm.parameters as? DEROctetString)?.octets
-            ?: p8.parsePrivateKey().toASN1Primitive().encoded
-        return raw
-    }
-
-    /** Import a raw 32-byte public key (hex) back into a PublicKey. */
-    fun importPublicKeyFromBytes(raw: ByteArray): PublicKey {
+    fun fromRawPublicKey(rawKeyBytes: ByteArray): PublicKey {
         val spki = SubjectPublicKeyInfo(
             AlgorithmIdentifier(EdECObjectIdentifiers.id_Ed25519),
-            DERBitString(raw)
+            DERBitString(rawKeyBytes)
         )
-        val keySpec = X509EncodedKeySpec(spki.encoded)
-        return KeyFactory.getInstance(ALGORITHM, PROVIDER).generatePublic(keySpec)
+        val der = spki.encoded
+        val spec = X509EncodedKeySpec(der)
+        return KeyFactory
+            .getInstance(ALGORITHM, PROVIDER)
+            .generatePublic(spec)
     }
 
-    /** Import a raw Ed25519 private key (hex seed) back into a PrivateKey. */
-    fun importPrivateKeyFromBytes(raw: ByteArray): PrivateKey {
-        // wrap raw into PKCS#8 PrivateKeyInfo
-        val p8 = PrivateKeyInfo(
-            AlgorithmIdentifier(EdECObjectIdentifiers.id_Ed25519),
-            DEROctetString(raw)
-        )
-        val keySpec = PKCS8EncodedKeySpec(p8.encoded)
-        return KeyFactory.getInstance(ALGORITHM, PROVIDER).generatePrivate(keySpec)
+    /**
+     * Decode a DER-encoded X.509 SubjectPublicKeyInfo (SPKI) blob
+     * back into a PublicKey (Bouncy-Castle’s BCEdDSAPublicKey under the hood).
+     */
+    fun decodePublicKey(spkiDer: ByteArray): PublicKey {
+        val spec = X509EncodedKeySpec(spkiDer)
+        return KeyFactory
+            .getInstance(ALGORITHM, PROVIDER)
+            .generatePublic(spec)
+    }
+
+    /**
+     * Decode a DER-encoded PKCS#8 PrivateKeyInfo blob
+     * back into a PrivateKey (Bouncy-Castle’s BCEdDSAPrivateKey under the hood).
+     */
+    fun decodePrivateKey(pkcs8Der: ByteArray): PrivateKey {
+        val spec = PKCS8EncodedKeySpec(pkcs8Der)
+        return KeyFactory
+            .getInstance(ALGORITHM, PROVIDER)
+            .generatePrivate(spec)
     }
 
     /** Encode to hex. */
@@ -111,14 +100,6 @@ object Signing {
         return hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
     }
 
-    /** Encode to Base64. */
-    fun encodeToBase64(bytes: ByteArray): String =
-        Base64.getEncoder().encodeToString(bytes)
-
-    /** Decode from Base64. */
-    fun decodeBase64(b64: String): ByteArray =
-        Base64.getDecoder().decode(b64)
-
     /**
      * Initialize the pairing operation for BBS group signatures.
      */
@@ -129,7 +110,7 @@ object Signing {
     /**
      * Sign a message under the group public key (gpk) with the user secret key (usk).
      *
-     * @throws SignatureException if the underlying native call fails
+     * @throws java.security.SignatureException if the underlying native call fails
      */
     @Throws(SignatureException::class)
     fun grpSigSign(gpk: ByteArray, usk: ByteArray, msg: ByteArray): ByteArray = try {
@@ -161,17 +142,5 @@ object Signing {
     } catch (e: Exception) {
         Log.d(TAG, "grpSigVerifyUsk failed: ${e.message}")
         false
-    }
-
-    /**
-     * Open (deanonymize) a signature to reveal the signer, using the opening secret key (osk).
-     *
-     * @throws SignatureException if the underlying native call fails
-     */
-    @Throws(SignatureException::class)
-    fun grpSigOpenSig(gpk: ByteArray, osk: ByteArray, sig: ByteArray): ByteArray = try {
-        BBSGS.bbs04Open(gpk, osk, sig)
-    } catch (e: Exception) {
-        throw SignatureException("grpSigOpenSig failed", e)
     }
 }

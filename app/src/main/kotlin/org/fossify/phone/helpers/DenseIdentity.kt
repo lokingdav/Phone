@@ -5,6 +5,8 @@ import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import org.fossify.phone.helpers.denseid.DenseIdentityCallState
+import org.fossify.phone.helpers.denseid.ManageEnrollment
 
 object DenseIdentity {
     private const val TAG = "DenseIdentity"
