@@ -1,6 +1,7 @@
 // src/main/java/org/fossify/phone/helpers/Signing.kt
 package org.fossify.phone.helpers
 
+import android.util.Log
 import io.github.denseidentity.bbsgroupsig.BBSGS
 import org.bouncycastle.asn1.ASN1Primitive
 import org.bouncycastle.asn1.DERBitString
@@ -31,6 +32,7 @@ import java.security.SignatureException
 object Signing {
     private const val ALGORITHM = "Ed25519"
     private const val PROVIDER  = "BC"
+    private const val TAG = "DenseID::Signing"
 
     init {
         Security.removeProvider(PROVIDER)
@@ -125,18 +127,6 @@ object Signing {
     }
 
     /**
-     * Generate a unique user secret key given the group public key (gpk) and issuer secret key (isk).
-     *
-     * @throws SignatureException if the underlying native call fails
-     */
-    @Throws(SignatureException::class)
-    fun grpSigUserKeyGen(gpk: ByteArray, isk: ByteArray): ByteArray = try {
-        BBSGS.bbs04UserKeygen(gpk, isk)
-    } catch (e: Exception) {
-        throw SignatureException("grpSigUserKeyGen failed", e)
-    }
-
-    /**
      * Sign a message under the group public key (gpk) with the user secret key (usk).
      *
      * @throws SignatureException if the underlying native call fails
@@ -163,8 +153,13 @@ object Signing {
      * Returns false if verification fails or if an error occurs.
      */
     fun grpSigVerifyUsk(gpk: ByteArray, usk: ByteArray): Boolean = try {
-        BBSGS.bbs04VerifyUsk(gpk, usk)
-    } catch (_: Exception) {
+        Log.d(TAG, "gpk: ${encodeToHex(gpk)}")
+        Log.d(TAG, "usk: ${encodeToHex(usk)}")
+        val res = BBSGS.bbs04VerifyUsk(gpk, usk)
+        Log.d(TAG, "grpSigVerifyUsk: $res")
+        res
+    } catch (e: Exception) {
+        Log.d(TAG, "grpSigVerifyUsk failed: ${e.message}")
         false
     }
 

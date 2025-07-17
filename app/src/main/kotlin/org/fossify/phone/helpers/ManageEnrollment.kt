@@ -81,17 +81,23 @@ object ManageEnrollment {
         )
 
         // 7) Finalize
-        finalizeEnrollment(
-            phoneNumber,
-            displayName,
-            logoUrl,
-            nonce,
-            0,
-            es1Res,
-            es2Res,
-            publicKeyBytes,
-            Signing.exportPrivateKeyToBytes(keys.private)
-        )
+        try {
+            finalizeEnrollment(
+                phoneNumber,
+                displayName,
+                logoUrl,
+                nonce,
+                0,
+                es1Res,
+                es2Res,
+                publicKeyBytes,
+                Signing.exportPrivateKeyToBytes(keys.private)
+            )
+            Log.d(TAG,"Enrollment Complete. Happy Calling")
+        } catch (e: Exception) {
+            val msg = "❌ Enrollment failed: ${e.message}"
+            Log.e(TAG, msg, e)
+        }
     }
 
     private fun finalizeEnrollment(
@@ -124,7 +130,7 @@ object ManageEnrollment {
             es1.gpk.toByteArray(),
         )
 
-        if (Signing.grpSigVerifyUsk(state.groupPk, state.userSk)) {
+        if (!Signing.grpSigVerifyUsk(state.groupPk, state.userSk)) {
             throw Exception("User Secret Key is Malformed")
         }
 
@@ -139,14 +145,14 @@ object ManageEnrollment {
             .build()
             .toByteArray()
 
-        if (Signing.regSigVerify(
+        if (!Signing.regSigVerify(
                 es1.publicKey.toByteArray(),
                 enMsg,
                 es1.sigma.toByteArray())) {
             throw Exception("Enrollment signature failed to verify under Registrar 1")
         }
 
-        if (Signing.regSigVerify(
+        if (!Signing.regSigVerify(
                 es2.publicKey.toByteArray(),
                 enMsg,
                 es2.sigma.toByteArray())) {
@@ -154,6 +160,8 @@ object ManageEnrollment {
         }
 
         state.save()
+
+        Log.d(TAG, "✅ Enrollment complete, eid=${state.eId}")
     }
 
     private fun callServer(

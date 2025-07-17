@@ -1,5 +1,6 @@
 package org.fossify.phone.helpers
 
+import android.util.Log
 import com.google.protobuf.Timestamp
 import org.json.JSONObject
 
@@ -69,8 +70,9 @@ data class DenseIdentityCallState(
             put(KeyLabel.GPK.code,Signing.encodeToHex(groupPk))
             put(KeyLabel.NONCE.code, nonce)
         }
-
-        DenseIdentityStore.putString(KeyLabel.DID.code, enrollmentJson.toString())
+        val data = enrollmentJson.toString()
+        Log.d("DenseIdentityCallState", "Saving $data")
+        DenseIdentityStore.putString(KeyLabel.DID.code, data)
     }
 
     companion object {
