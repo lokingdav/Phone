@@ -9,7 +9,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.DialogFragment
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import org.fossify.phone.R
-import org.fossify.phone.helpers.DenseIdentity
+import org.fossify.phone.denseid.DenseIdentityService
 import androidx.lifecycle.lifecycleScope
 
 class EnrollmentDialogFragment : DialogFragment() {
@@ -46,7 +46,7 @@ class EnrollmentDialogFragment : DialogFragment() {
 
         if (org.fossify.phone.BuildConfig.DEBUG) {
             phoneNumberInput.setText("+15551234567")
-            displayNameInput.setText("Janet Doeyer")
+            displayNameInput.setText("Janet Denver")
             logoUrlInput.setText("https://avatar.iran.liara.run/public/54")
         }
 
@@ -86,7 +86,7 @@ class EnrollmentDialogFragment : DialogFragment() {
                     val message = "Enrolling:\nPhone: $phoneNumber\nName: $displayName\nLogo: $logoUrl"
                     Toast.makeText(requireContext(), message, Toast.LENGTH_LONG).show()
 
-                    DenseIdentity.enrollNewNumber(
+                    DenseIdentityService.enrollNewNumber(
                         phoneNumber = phoneNumber,
                         displayName = displayName,
                         logoUrl     = logoUrl,

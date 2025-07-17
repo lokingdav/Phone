@@ -1,4 +1,4 @@
-package org.fossify.phone.helpers.denseid
+package org.fossify.phone.denseid
 
 import android.util.Log
 import io.github.denseidentity.bbsgroupsig.BBSGS
@@ -134,13 +134,13 @@ object Signing {
      * Returns false if verification fails or if an error occurs.
      */
     fun grpSigVerifyUsk(gpk: ByteArray, usk: ByteArray): Boolean = try {
-        Log.d(TAG, "gpk: ${encodeToHex(gpk)}")
-        Log.d(TAG, "usk: ${encodeToHex(usk)}")
+//        Log.d(TAG, "gpk: ${encodeToHex(gpk)}")
+//        Log.d(TAG, "usk: ${encodeToHex(usk)}")
         val res = BBSGS.bbs04VerifyUsk(gpk, usk)
-        Log.d(TAG, "grpSigVerifyUsk: $res")
+//        Log.d(TAG, "grpSigVerifyUsk: $res")
         res
     } catch (e: Exception) {
-        Log.d(TAG, "grpSigVerifyUsk failed: ${e.message}")
+//        Log.d(TAG, "grpSigVerifyUsk failed: ${e.message}")
         false
     }
 }

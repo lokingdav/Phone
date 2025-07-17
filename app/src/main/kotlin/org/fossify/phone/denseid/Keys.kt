@@ -1,4 +1,4 @@
-package org.fossify.phone.helpers.denseid
+package org.fossify.phone.denseid
 
 import java.security.KeyPair
 import java.security.PrivateKey

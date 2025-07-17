@@ -1,18 +1,16 @@
-package org.fossify.phone.helpers
+package org.fossify.phone.denseid
 
 import android.telecom.Call
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import org.fossify.phone.helpers.denseid.DenseIdentityCallState
-import org.fossify.phone.helpers.denseid.ManageEnrollment
 
-object DenseIdentity {
+object DenseIdentityService {
     private const val TAG = "DenseIdentity"
-    private lateinit var callState: DenseIdentityCallState
+    private lateinit var callState: UserState
 
-    fun init(state: DenseIdentityCallState) {
+    fun init(state: UserState) {
         callState = state
     }
 

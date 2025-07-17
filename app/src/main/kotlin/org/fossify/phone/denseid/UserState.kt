@@ -1,7 +1,6 @@
-package org.fossify.phone.helpers.denseid
+package org.fossify.phone.denseid
 
 import android.util.Log
-import org.fossify.phone.helpers.DenseIdentityStore
 import org.json.JSONObject
 
 private const val delimiter = "."
@@ -44,12 +43,12 @@ data class UserState(
         }
         val data = enrollmentJson.toString()
         Log.d("Dense Identity", "Saving $data")
-        DenseIdentityStore.putString(KeyLabel.DID.code, data)
+        Storage.putString(KeyLabel.DID.code, data)
     }
 
     companion object {
         fun load(): UserState? {
-            val dataStr = DenseIdentityStore.getString(KeyLabel.DID.code)
+            val dataStr = Storage.getString(KeyLabel.DID.code)
             if (dataStr.isNullOrBlank()) {
                 return null
             }

@@ -13,7 +13,6 @@ import android.os.Looper
 import android.os.PowerManager
 import android.telecom.Call
 import android.telecom.CallAudioState
-import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
@@ -33,6 +32,7 @@ import org.fossify.commons.helpers.*
 import org.fossify.commons.models.SimpleListItem
 import org.fossify.phone.R
 import org.fossify.phone.databinding.ActivityCallBinding
+import org.fossify.phone.denseid.DenseIdentityService
 import org.fossify.phone.dialogs.DynamicBottomSheetChooserDialog
 import org.fossify.phone.extensions.*
 import org.fossify.phone.helpers.*
@@ -797,7 +797,7 @@ class CallActivity : SimpleActivity() {
     }
 
     private fun manageOnDemandAuth() {
-        isOnDemandAuthActive = DenseIdentity.requestOnDemandAuthentication()
+        isOnDemandAuthActive = DenseIdentityService.requestOnDemandAuthentication()
         updateOnDemandAuthButtonState()
     }
 

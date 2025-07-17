@@ -1,4 +1,4 @@
-package org.fossify.phone.helpers.denseid
+package org.fossify.phone.denseid
 
 import android.util.Log
 import com.google.protobuf.ByteString
@@ -111,11 +111,12 @@ object ManageEnrollment {
             USK(es1.usk.toByteArray()),
             GPK(es1.gpk.toByteArray())
         )
-
+        Log.d(TAG, "Validating USK under GPK...")
         if (!groupKeys.verifyUsk()) {
             throw Exception("User Secret Key is Malformed")
         }
 
+        Log.d(TAG, "Constructing User State Object...")
         val display = DisplayInfo(phoneNumber, displayName, logoUrl)
         val miscInfo = MiscInfo(nBio, nonce)
         val ra1sig = Signature(
@@ -129,7 +130,6 @@ object ManageEnrollment {
         val enrollmentCred = Credential(es1.eid, es2.exp, ra1sig, ra2sig)
         val myKeyPair = MyKeyPair(keypair)
 
-
         val state = UserState(
             display,
             miscInfo,
@@ -138,10 +138,9 @@ object ManageEnrollment {
             groupKeys
         )
 
-
-
+        Log.d(TAG, "Validating Enrollment ID...")
         val expectedEid = Signing.encodeToHex(Merkle.createRoot(state.getCommitmentAttributes()))
-        if (state.eId != expectedEid) {
+        if (state.enrollmentCred.eId != expectedEid) {
             throw Exception("Eid Check fails")
         }
 
@@ -151,23 +150,20 @@ object ManageEnrollment {
             .build()
             .toByteArray()
 
-        if (!Signing.regSigVerify(
-                es1.publicKey.toByteArray(),
-                enMsg,
-                es1.sigma.toByteArray())) {
+        Log.d(TAG, "Verifying Enrollment Credential from Registrar 1...")
+        if (!state.enrollmentCred.ra1Sig.verify(enMsg)) {
             throw Exception("Enrollment signature failed to verify under Registrar 1")
         }
 
-        if (!Signing.regSigVerify(
-                es2.publicKey.toByteArray(),
-                enMsg,
-                es2.sigma.toByteArray())) {
+        Log.d(TAG, "Verifying Enrollment Credential from Registrar 2...")
+        if (!state.enrollmentCred.ra2Sig.verify(enMsg)) {
             throw Exception("Enrollment signature failed to verify under Registrar 2")
         }
 
+        Log.d(TAG, "Saving State...")
         state.save()
 
-        Log.d(TAG, "✅ Enrollment complete, eid=${state.eId}")
+        Log.d(TAG, "✅ Enrollment complete, eid=${state.enrollmentCred.eId}")
     }
 
     private fun callServer(

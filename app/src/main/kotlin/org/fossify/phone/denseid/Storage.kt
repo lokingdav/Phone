@@ -1,10 +1,10 @@
-package org.fossify.phone.helpers
+package org.fossify.phone.denseid
 
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
 
-object DenseIdentityStore {
+object Storage {
     private const val PREFS_NAME = "dense_identity_prefs"
     private lateinit var prefs: SharedPreferences
 

@@ -1,18 +1,18 @@
 package org.fossify.phone
 
 import org.fossify.commons.FossifyApp
-import org.fossify.phone.helpers.denseid.DenseIdentityCallState
-import org.fossify.phone.helpers.DenseIdentityStore
-import org.fossify.phone.helpers.denseid.Signing
+import org.fossify.phone.denseid.Storage
+import org.fossify.phone.denseid.Signing
+import org.fossify.phone.denseid.UserState
 
 class App : FossifyApp() {
-    var denseIdState: DenseIdentityCallState? = null
+    var denseIdState: UserState? = null
 
     override fun onCreate() {
         super.onCreate()
 
         Signing.initGroupSignatures()
-        DenseIdentityStore.init(this)
-        denseIdState = DenseIdentityCallState.load()
+        Storage.init(this)
+        denseIdState = UserState.load()
     }
 }
