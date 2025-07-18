@@ -17,6 +17,14 @@ data class GroupKeys(val usk: USK, val gpk: GPK) {
         return Signing.grpSigVerify(gpk.encoded, signature, msg)
     }
 
+    fun sign(message: ByteArray): ByteArray {
+        return Signing.grpSigSign(
+            gpk.encoded,
+            usk.encoded,
+            message
+        )
+    }
+
     fun toJson(): JSONObject {
         val data = JSONObject().apply {
             put("uk", Signing.encodeToHex(usk.encoded))

@@ -1,12 +1,6 @@
 package org.fossify.phone.denseid
 
-import android.util.Log
 import io.github.denseidentity.bbsgroupsig.BBSGS
-import org.bouncycastle.asn1.ASN1Primitive
-import org.bouncycastle.asn1.DERBitString
-import org.bouncycastle.asn1.x509.AlgorithmIdentifier
-import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo
-import org.bouncycastle.internal.asn1.edec.EdECObjectIdentifiers
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.security.KeyFactory
 import java.security.KeyPair

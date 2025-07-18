@@ -13,6 +13,33 @@ enum class KeyLabel(val code: String) {
     KEY_PAIR("KP"),
     ENROLLED_CRED("CR"),
     GROUP_KEYS("GK"),
+
+    SHARED_STATE("ST")
+}
+
+data class SharedState(
+    val phoneNumber: String,
+    var rootKey: ByteArray,
+    var channelKey: ByteArray
+) {
+    fun toJson(): JSONObject {
+        val data = JSONObject().apply {
+            put("pn", phoneNumber)
+            put("rk", Signing.encodeToHex(rootKey))
+            put("ck", Signing.encodeToHex(channelKey))
+        }
+        return data
+    }
+
+    companion object {
+        fun fromJson(data: JSONObject): SharedState {
+            return SharedState(
+                data.getString("pn"),
+                Signing.decodeHex(data.getString("rk")),
+                Signing.decodeHex(data.getString("ck"))
+            )
+        }
+    }
 }
 
 object UserState {
@@ -36,6 +63,29 @@ object UserState {
         this.keyPair = keyPair
         this.groupKeys = groupKeys
         generateInclusionProofs()
+    }
+
+    fun addSharedState(recipient: String, sharedKey: ByteArray): SharedState {
+        val state = SharedState(
+            recipient,
+            sharedKey,
+            Utilities.hash(sharedKey + "channelKey".toByteArray())
+        )
+        Storage.putString(
+            "${display.phoneNumber}${recipient}${KeyLabel.SHARED_STATE.code}",
+            state.toJson().toString()
+        )
+        return state
+    }
+
+    fun getSharedState(recipient: String): SharedState? {
+        val dataStr = Storage.getString(
+            "${display.phoneNumber}${recipient}${KeyLabel.SHARED_STATE.code}"
+        )
+        if (dataStr.isNullOrBlank()) {
+            return null
+        }
+        return SharedState.fromJson(JSONObject(dataStr))
     }
 
     fun getCommitmentAttributes(): List<String> {

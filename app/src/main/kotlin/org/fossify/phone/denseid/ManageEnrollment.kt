@@ -65,15 +65,15 @@ object ManageEnrollment {
         // 6) Sequential calls
         Log.d(TAG, "⚡ Calling ES1")
         val es1Res = callServer(
-            BuildConfig.DENSEID_ES1_HOST,
-            BuildConfig.DENSEID_ES1_PORT,
+            BuildConfig.ES1_HOST,
+            BuildConfig.ES1_PORT,
             req, "ES1"
         )
 
         Log.d(TAG, "⚡ Calling ES2")
         val es2Res = callServer(
-            BuildConfig.DENSEID_ES2_HOST,
-            BuildConfig.DENSEID_ES2_PORT,
+            BuildConfig.ES2_HOST,
+            BuildConfig.ES2_PORT,
             req, "ES2"
         )
 

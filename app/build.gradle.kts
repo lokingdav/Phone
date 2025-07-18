@@ -12,10 +12,38 @@ plugins {
     id("com.google.protobuf") version "0.9.5"
 }
 
-val denseid_es1_host: String = System.getenv("DENSEID_ES1_HOST") ?: "10.0.2.2"
-val denseid_es1_port: String = System.getenv("DENSEID_ES1_PORT") ?: "50051"
-val denseid_es2_host: String = System.getenv("DENSEID_ES2_HOST") ?: "10.0.2.2"
-val denseid_es2_port: String = System.getenv("DENSEID_ES2_PORT") ?: "50052"
+data class Server(val host: String, val port: String)
+val defaultHost = "10.0.2.2"
+val SERVERS: Map<String, Server> = mapOf(
+    // Enrollment Servers
+    "es1" to Server(
+        host = System.getenv("ES1_HOST") ?: defaultHost,
+        port = System.getenv("ES1_PORT") ?: "50051"
+    ),
+    "es2" to Server(
+        host = System.getenv("ES2_HOST") ?: defaultHost,
+        port = System.getenv("ES2_PORT") ?: "50052"
+    ),
+    // Key Derivation Servers
+    "kd1" to Server(
+        host = System.getenv("KD1_HOST") ?: defaultHost,
+        port = System.getenv("KD1_PORT") ?: "50053"
+    ),
+    "kd2" to Server(
+        host = System.getenv("KD2_HOST") ?: defaultHost,
+        port = System.getenv("KD2_PORT") ?: "50054"
+    ),
+    // Revocation Servers
+    "rvk" to Server(
+        host = System.getenv("RVK_HOST") ?: defaultHost,
+        port = System.getenv("RVK_PORT") ?: "50055"
+    ),
+    // Relay Server
+    "rel" to Server(
+        host = System.getenv("RS_HOST") ?: defaultHost,
+        port = System.getenv("RS_PORT") ?: "50054"
+    )
+)
 
 val keystorePropertiesFile: File = rootProject.file("keystore.properties")
 val keystoreProperties = Properties()
@@ -41,10 +69,31 @@ android {
         versionCode = project.property("VERSION_CODE").toString().toInt()
         setProperty("archivesBaseName", "phone-$versionCode")
 
-        buildConfigField("String", "DENSEID_ES1_HOST", "\"$denseid_es1_host\"")
-        buildConfigField("int",    "DENSEID_ES1_PORT", denseid_es1_port)
-        buildConfigField("String", "DENSEID_ES2_HOST", "\"$denseid_es2_host\"")
-        buildConfigField("int",    "DENSEID_ES2_PORT", denseid_es2_port)
+        // Enrollment Servers
+        val es1 = SERVERS["es1"]
+        buildConfigField("String", "ES1_HOST", "\"${es1?.host}\"")
+        buildConfigField("int",    "ES1_PORT", es1?.port!!)
+        val es2 = SERVERS["es2"]
+        buildConfigField("String", "ES2_HOST", "\"${es2?.host}\"")
+        buildConfigField("int",    "ES2_PORT", es2?.port!!)
+
+        // Key Derivation Servers
+        val kd1 = SERVERS["kd1"]
+        buildConfigField("String", "KD1_HOST", "\"${kd1?.host}\"")
+        buildConfigField("int",    "KD1_PORT", kd1?.port!!)
+        val kd2 = SERVERS["kd2"]
+        buildConfigField("String", "KD2_HOST", "\"${kd2?.host}\"")
+        buildConfigField("int",    "KD2_PORT", kd2?.port!!)
+
+        // Revocation Servers
+        val rvk = SERVERS["rvk"]
+        buildConfigField("String", "RVK_HOST", "\"${rvk?.host}\"")
+        buildConfigField("int",    "RVK_PORT", rvk?.port!!)
+
+        // Relay Server
+        val rs = SERVERS["rel"]
+        buildConfigField("String", "RS_HOST", "\"${rs?.host}\"")
+        buildConfigField("int",    "RS_PORT", rs?.port!!)
     }
 
     signingConfigs {
