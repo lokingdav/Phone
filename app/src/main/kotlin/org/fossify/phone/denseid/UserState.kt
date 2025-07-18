@@ -2,6 +2,7 @@ package org.fossify.phone.denseid
 
 import Merkle
 import android.util.Log
+import org.fossify.phone.denseid.UserState.display
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -26,6 +27,13 @@ data class SharedState(
     var rootKey: ByteArray,
     var channelKey: ByteArray
 ) {
+    fun persist() {
+        Storage.putString(
+            "${display.phoneNumber}${phoneNumber}${KeyLabel.SHARED_STATE.code}",
+            toJson().toString()
+        )
+    }
+
     fun toJson(): JSONObject {
         val data = JSONObject().apply {
             put("pn", phoneNumber)
@@ -75,10 +83,7 @@ object UserState {
             sharedKey,
             Utilities.hash(sharedKey + "channelKey".toByteArray())
         )
-        Storage.putString(
-            "${display.phoneNumber}${recipient}${KeyLabel.SHARED_STATE.code}",
-            state.toJson().toString()
-        )
+        state.persist()
         return state
     }
 
