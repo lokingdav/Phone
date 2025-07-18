@@ -18,7 +18,6 @@ import java.util.concurrent.TimeUnit
  */
 object ManageEnrollment {
     private const val TAG = "DenseID-ManageEnrollment"
-    private const val PREFIX: String = "denseid"
 
     /**
      * Builds a signed EnrollmentRequest, performs two RPCs in sequence,
@@ -131,7 +130,7 @@ object ManageEnrollment {
         val enrollmentCred = Credential(es1.eid, es2.exp, ra1sig, ra2sig)
         val myKeyPair = MyKeyPair(keypair)
 
-        val state = UserState(
+        UserState.update(
             display,
             miscInfo,
             enrollmentCred,
@@ -144,8 +143,8 @@ object ManageEnrollment {
         if (es1.eid != es2.eid) {
             throw Exception("Eid from ES1 and ES2 are different")
         }
-        val expectedEid = Signing.encodeToHex(Merkle.createRoot(state.getCommitmentAttributes()))
-        if (state.enrollmentCred.eId != expectedEid) {
+        val expectedEid = Signing.encodeToHex(Merkle.createRoot(UserState.getCommitmentAttributes()))
+        if (UserState.enrollmentCred.eId != expectedEid) {
             throw Exception("Expected Eid does not match the computed value")
         }
         Log.d(TAG, "\t✅ Valid!")
@@ -162,22 +161,22 @@ object ManageEnrollment {
             .toByteArray()
 
         Log.d(TAG, "Verifying Enrollment Credential from Registrar 1...")
-        if (!state.enrollmentCred.ra1Sig.verify(enMsg)) {
+        if (!UserState.enrollmentCred.ra1Sig.verify(enMsg)) {
             throw Exception("Enrollment signature failed to verify under Registrar 1")
         }
         Log.d(TAG, "\t✅ Valid!")
 
         Log.d(TAG, "Verifying Enrollment Credential from Registrar 2...")
-        if (!state.enrollmentCred.ra2Sig.verify(enMsg)) {
+        if (!UserState.enrollmentCred.ra2Sig.verify(enMsg)) {
             throw Exception("Enrollment signature failed to verify under Registrar 2")
         }
         Log.d(TAG, "\t✅ Valid!")
 
         Log.d(TAG, "Saving State...")
-        state.save()
+        UserState.persist()
         Log.d(TAG, "\t✅ Saved!")
 
-        Log.d(TAG, "✅ Enrollment complete, eid=${state.enrollmentCred.eId}")
+        Log.d(TAG, "✅ Enrollment complete, eid=${UserState.enrollmentCred.eId}")
     }
 
     private fun callServer(

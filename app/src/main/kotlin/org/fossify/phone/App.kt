@@ -1,5 +1,6 @@
 package org.fossify.phone
 
+import android.util.Log
 import org.fossify.commons.FossifyApp
 import org.fossify.phone.denseid.DenseIdentityService
 import org.fossify.phone.denseid.Storage
@@ -12,6 +13,6 @@ class App : FossifyApp() {
 
         Signing.initGroupSignatures()
         Storage.init(this)
-        DenseIdentityService.init(UserState.load())
+        UserState.load()
     }
 }

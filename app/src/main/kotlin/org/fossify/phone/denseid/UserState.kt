@@ -1,5 +1,6 @@
 package org.fossify.phone.denseid
 
+import Merkle
 import android.util.Log
 import org.json.JSONObject
 
@@ -14,13 +15,29 @@ enum class KeyLabel(val code: String) {
     GROUP_KEYS("GK"),
 }
 
-data class UserState(
-    val display: DisplayInfo,
-    val misc: MiscInfo,
-    val enrollmentCred: Credential,
-    val keyPair: MyKeyPair,
-    val groupKeys: GroupKeys
-) {
+object UserState {
+    lateinit var display: DisplayInfo
+    lateinit var misc: MiscInfo
+    lateinit var enrollmentCred: Credential
+    lateinit var keyPair: MyKeyPair
+    lateinit var groupKeys: GroupKeys
+    lateinit var inclusionProofs: MutableMap<String, Merkle.MerkleProof>
+
+    fun update(
+        display: DisplayInfo,
+        misc: MiscInfo,
+        enrollmentCred: Credential,
+        keyPair: MyKeyPair,
+        groupKeys: GroupKeys
+    ) {
+        this.display = display
+        this.misc = misc
+        this.enrollmentCred = enrollmentCred
+        this.keyPair = keyPair
+        this.groupKeys = groupKeys
+        generateInclusionProofs()
+    }
+
     fun getCommitmentAttributes(): List<String> {
         val attributes: List<String> = listOf(
             display.phoneNumber,
@@ -33,42 +50,52 @@ data class UserState(
         return attributes
     }
 
-    fun save() {
-        val enrollmentJson = JSONObject().apply {
+    fun generateInclusionProofs() {
+        val attributes = getCommitmentAttributes()
+        val pkHex = Signing.encodeToHex(keyPair.public.encoded)
+        inclusionProofs = mutableMapOf()
+        inclusionProofs[display.phoneNumber] = Merkle.generateProof(attributes, display.phoneNumber)!!
+        inclusionProofs[display.name] = Merkle.generateProof(attributes, display.name)!!
+        inclusionProofs[display.logoUrl] = Merkle.generateProof(attributes, display.logoUrl)!!
+        inclusionProofs[pkHex] = Merkle.generateProof(attributes, pkHex)!!
+    }
+
+    fun persist() {
+        val data = toJson().toString()
+        Log.d("Dense Identity", "Saving $data")
+        Storage.putString(KeyLabel.DID.code, data)
+    }
+
+    fun toJson(): JSONObject {
+        val state = JSONObject().apply {
             put(KeyLabel.DISPLAY_INFO.code, display.toJson())
             put(KeyLabel.MISC_INFO.code,misc.toJson())
             put(KeyLabel.ENROLLED_CRED.code,enrollmentCred.toJson())
             put(KeyLabel.KEY_PAIR.code,keyPair.toJson())
             put(KeyLabel.GROUP_KEYS.code,groupKeys.toJson())
         }
-        val data = enrollmentJson.toString()
-        Log.d("Dense Identity", "Saving $data")
-        Storage.putString(KeyLabel.DID.code, data)
+        return state
     }
 
-    companion object {
-        fun load(): UserState? {
-            val dataStr = Storage.getString(KeyLabel.DID.code)
-            if (dataStr.isNullOrBlank()) {
-                return null
-            }
+    fun load() {
+        val dataStr = Storage.getString(KeyLabel.DID.code)
+        if (dataStr.isNullOrBlank()) {
+            return
+        }
 
-            val data = JSONObject(dataStr)
+        val data = JSONObject(dataStr)
 
-            try {
-                val state = UserState(
-                    display=DisplayInfo.fromJson(data.getJSONObject(KeyLabel.DISPLAY_INFO.code)),
-                    misc=MiscInfo.fromJson(data.getJSONObject(KeyLabel.MISC_INFO.code)),
-                    enrollmentCred=Credential.fromJson(data.getJSONObject(KeyLabel.ENROLLED_CRED.code)),
-                    keyPair=MyKeyPair.fromJson(data.getJSONObject(KeyLabel.KEY_PAIR.code)),
-                    groupKeys=GroupKeys.fromJson(data.getJSONObject(KeyLabel.GROUP_KEYS.code))
-                )
-                return state
-            } catch (e: Exception) {
-                Log.e(TAG,"Failed to Load $TAG state", e)
-            }
-
-            return null
+        try {
+            update(
+                display=DisplayInfo.fromJson(data.getJSONObject(KeyLabel.DISPLAY_INFO.code)),
+                misc=MiscInfo.fromJson(data.getJSONObject(KeyLabel.MISC_INFO.code)),
+                enrollmentCred=Credential.fromJson(data.getJSONObject(KeyLabel.ENROLLED_CRED.code)),
+                keyPair=MyKeyPair.fromJson(data.getJSONObject(KeyLabel.KEY_PAIR.code)),
+                groupKeys=GroupKeys.fromJson(data.getJSONObject(KeyLabel.GROUP_KEYS.code))
+            )
+            generateInclusionProofs()
+        } catch (e: Exception) {
+            Log.e(TAG,"Failed to Load $TAG state", e)
         }
     }
 }
