@@ -236,6 +236,8 @@ dependencies {
     implementation("org.bouncycastle:bcprov-jdk18on:1.81")
 
     implementation(files("libs/bbsgslib-release.aar"))
+
+    implementation("org.signal:libsignal-client:0.76.4")
 }
 
 // Protobuf configuration block
