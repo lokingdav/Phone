@@ -36,7 +36,7 @@ object DenseIdentityService {
 
     fun startOutgoingCall(recipient: String) {
         Log.d(TAG, "Start outgoing call for recipient: $recipient")
-        KeyDerivation.run(recipient)
+        val sharedState = KeyDerivation.run(recipient)
     }
 
     fun requestOnDemandAuthentication(): Boolean {

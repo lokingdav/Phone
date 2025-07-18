@@ -3,6 +3,10 @@ package org.fossify.phone.denseid
 import Merkle
 import android.util.Log
 import org.json.JSONObject
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.ObjectInputStream
+import java.io.ObjectOutputStream
 
 private const val TAG = "Dense Identity"
 
@@ -108,6 +112,26 @@ object UserState {
         inclusionProofs[display.name] = Merkle.generateProof(attributes, display.name)!!
         inclusionProofs[display.logoUrl] = Merkle.generateProof(attributes, display.logoUrl)!!
         inclusionProofs[pkHex] = Merkle.generateProof(attributes, pkHex)!!
+    }
+
+    fun serializeInclusionProofs(): ByteArray {
+        ByteArrayOutputStream().use { bos ->
+            ObjectOutputStream(bos).use { oos ->
+                oos.writeObject(inclusionProofs)
+            }
+            return bos.toByteArray()
+        }
+    }
+
+    fun deserializeInclusionProofs(bytes: ByteArray): MutableMap<String, Merkle.MerkleProof> {
+        require(bytes.isNotEmpty()) { "Cannot deserialize empty byte array" }
+        ByteArrayInputStream(bytes).use { bis ->
+            ObjectInputStream(bis).use { ois ->
+                val obj = ois.readObject()
+                @Suppress("UNCHECKED_CAST")
+                return obj as MutableMap<String, Merkle.MerkleProof>
+            }
+        }
     }
 
     fun persist() {

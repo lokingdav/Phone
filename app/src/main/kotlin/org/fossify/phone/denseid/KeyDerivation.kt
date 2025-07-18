@@ -23,11 +23,11 @@ object KeyDerivation {
     private const val TAG = "Dense Identity"
     private const val HASH_ALG = "SHA-256"
 
-    fun run(recipient: String) {
+    fun run(recipient: String): SharedState {
         val sharedState = UserState.getSharedState(recipient)
         if (sharedState != null) {
             Log.d(TAG, "Shared state found for $recipient:\n${sharedState.toJson()}")
-            return
+            return sharedState
         }
 
         // Blind input
@@ -60,7 +60,7 @@ object KeyDerivation {
             "KD2"
         )
 
-        finalize(recipient, scalar, kd1Res, kd2Res)
+        return finalize(recipient, scalar, kd1Res, kd2Res)
     }
 
     fun finalize(
@@ -68,7 +68,7 @@ object KeyDerivation {
         scalar: Scalar,
         kd1Res: Keyderivation.EvaluateResponse,
         kd2Res: Keyderivation.EvaluateResponse
-    ) {
+    ): SharedState {
         val y1 = OPRF.finalize(
             Point(kd1Res.evaluatedElement.toByteArray()),
             scalar
@@ -80,6 +80,7 @@ object KeyDerivation {
         val sharedKey = hashXor(y1.encoded, y2.encoded)
         val state = UserState.addSharedState(recipient, sharedKey)
         Log.d(TAG, "Shared State: ${state.toJson()}")
+        return state
     }
 
     fun hashXor(y1: ByteArray, y2: ByteArray): ByteArray {
