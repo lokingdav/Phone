@@ -5,21 +5,17 @@ import io.grpc.ManagedChannelBuilder
 import com.google.protobuf.ByteString
 import denseid.keyderivation.v1.KeyDerivationServiceGrpc
 import denseid.keyderivation.v1.Keyderivation
-import io.github.lokingdav.libdia.LibDia
 import io.grpc.StatusRuntimeException
 import org.fossify.phone.BuildConfig
-import java.security.MessageDigest
 import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.concurrent.TimeUnit
-import kotlin.experimental.xor
 
 /**
  * Utility for performing one-round OPRF evaluations against a KeyDerivationService.
  */
 object KeyDerivation {
-    private const val TAG = "Dense Identity"
-    private const val HASH_ALG = "SHA-256"
+    private const val TAG = "CallAuth-KeyDerivation"
 
     fun run(callerId: String): ByteArray {
         val ts = LocalDate.now(ZoneOffset.UTC).toString()
@@ -33,7 +29,9 @@ object KeyDerivation {
 
         val res = callServer(request)
 
-        return LibDia.voprfUnblind(res.evaluatedElement.toByteArray(), scalar.encoded)
+        val evaluated = Point(res.evaluatedElement.toByteArray())
+
+        return VOPRF.finalize(evaluated, scalar).encoded
     }
 
     private fun callServer(req: Keyderivation.EvaluateRequest): Keyderivation.EvaluateResponse {

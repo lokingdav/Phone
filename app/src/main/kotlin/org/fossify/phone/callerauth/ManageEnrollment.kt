@@ -12,6 +12,7 @@ import org.fossify.phone.BuildConfig
 import java.security.KeyPair
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import kotlin.math.log
 
 /**
  * Handles key generation, request marshaling, signing over the serialized proto,
@@ -121,9 +122,13 @@ object ManageEnrollment {
         )
         // append phoneNumber to every val in attributes
         attributes.forEachIndexed { i, v -> attributes[i] = "$v$phoneNumber" }
+
+        Log.d(TAG, "\tAttributes: ${attributes.joinToString("\n")}")
+
         if (!signature.verify(attributes)) {
             throw Exception("Enrollment signature failed to verify under Registrar 1")
         }
+
         Log.d(TAG, "\t✅ Valid!")
 
         Log.d(TAG, "Saving State...")

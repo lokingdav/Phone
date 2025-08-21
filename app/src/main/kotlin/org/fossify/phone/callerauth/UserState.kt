@@ -104,7 +104,7 @@ object UserState {
         val state = JSONObject().apply {
             put(KeyLabel.DISPLAY_INFO.code, display.toJson())
             put(KeyLabel.EID.code, eId)
-            put(KeyLabel.EXP.code, eExp.toString())
+            put(KeyLabel.EXP.code, Signing.encodeToHex(eExp.toByteArray()))
             put(KeyLabel.AMF_KP.code, amfKp.toJson())
             put(KeyLabel.ENR_KP.code, enrKp.toJson())
             put(KeyLabel.SIG.code, signature.toJson())
