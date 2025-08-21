@@ -6,7 +6,7 @@ import android.telecom.Call
 import android.telecom.CallAudioState
 import android.telecom.InCallService
 import android.telecom.VideoProfile
-import org.fossify.phone.denseid.DenseIdentityService
+import org.fossify.phone.callerauth.AuthService
 import org.fossify.phone.extensions.getStateCompat
 import org.fossify.phone.extensions.hasCapability
 import org.fossify.phone.extensions.isConference
@@ -24,7 +24,7 @@ class CallManager {
 
         fun onCallAdded(call: Call) {
             if (call.details.callDirection == Call.Details.DIRECTION_INCOMING) {
-                DenseIdentityService.handleIncomingCall(call)
+                AuthService.handleIncomingCall(call)
             }
 
             this.call = call

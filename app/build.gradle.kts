@@ -15,33 +15,28 @@ plugins {
 data class Server(val host: String, val port: String)
 val defaultHost = "10.0.2.2"
 val SERVERS: Map<String, Server> = mapOf(
-    // Enrollment Servers
-    "es1" to Server(
-        host = System.getenv("ES1_HOST") ?: defaultHost,
-        port = System.getenv("ES1_PORT") ?: "50051"
+    // Enrollment Server
+    "es" to Server(
+        host = System.getenv("ES_HOST") ?: defaultHost,
+        port = System.getenv("ES_PORT") ?: "50051"
     ),
-    "es2" to Server(
-        host = System.getenv("ES2_HOST") ?: defaultHost,
-        port = System.getenv("ES2_PORT") ?: "50052"
+
+    // Key Derivation Server
+    "ks" to Server(
+        host = System.getenv("KS_HOST") ?: defaultHost,
+        port = System.getenv("KS_PORT") ?: "50052"
     ),
-    // Key Derivation Servers
-    "kd1" to Server(
-        host = System.getenv("KD1_HOST") ?: defaultHost,
-        port = System.getenv("KD1_PORT") ?: "50053"
-    ),
-    "kd2" to Server(
-        host = System.getenv("KD2_HOST") ?: defaultHost,
-        port = System.getenv("KD2_PORT") ?: "50054"
-    ),
-    // Revocation Servers
-    "rvk" to Server(
-        host = System.getenv("RVK_HOST") ?: defaultHost,
-        port = System.getenv("RVK_PORT") ?: "50055"
-    ),
+
     // Relay Server
-    "rel" to Server(
+    "rs" to Server(
         host = System.getenv("RS_HOST") ?: defaultHost,
-        port = System.getenv("RS_PORT") ?: "50054"
+        port = System.getenv("RS_PORT") ?: "50053"
+    ),
+
+    // Revocation Server
+    "rv" to Server(
+        host = System.getenv("RV_HOST") ?: defaultHost,
+        port = System.getenv("RV_PORT") ?: "50054"
     )
 )
 
@@ -70,30 +65,20 @@ android {
         setProperty("archivesBaseName", "phone-$versionCode")
 
         // Enrollment Servers
-        val es1 = SERVERS["es1"]
-        buildConfigField("String", "ES1_HOST", "\"${es1?.host}\"")
-        buildConfigField("int",    "ES1_PORT", es1?.port!!)
-        val es2 = SERVERS["es2"]
-        buildConfigField("String", "ES2_HOST", "\"${es2?.host}\"")
-        buildConfigField("int",    "ES2_PORT", es2?.port!!)
+        buildConfigField("String", "ES_HOST", "\"${SERVERS["es"]?.host}\"")
+        buildConfigField("int",    "ES_PORT", SERVERS["es"]?.port!!)
 
         // Key Derivation Servers
-        val kd1 = SERVERS["kd1"]
-        buildConfigField("String", "KD1_HOST", "\"${kd1?.host}\"")
-        buildConfigField("int",    "KD1_PORT", kd1?.port!!)
-        val kd2 = SERVERS["kd2"]
-        buildConfigField("String", "KD2_HOST", "\"${kd2?.host}\"")
-        buildConfigField("int",    "KD2_PORT", kd2?.port!!)
+        buildConfigField("String", "KS_HOST", "\"${SERVERS["ks"]?.host}\"")
+        buildConfigField("int",    "KS_PORT", SERVERS["ks"]?.port!!)
 
         // Revocation Servers
-        val rvk = SERVERS["rvk"]
-        buildConfigField("String", "RVK_HOST", "\"${rvk?.host}\"")
-        buildConfigField("int",    "RVK_PORT", rvk?.port!!)
+        buildConfigField("String", "RV_HOST", "\"${SERVERS["rv"]?.host}\"")
+        buildConfigField("int",    "RV_PORT", SERVERS["rv"]?.port!!)
 
         // Relay Server
-        val rs = SERVERS["rel"]
-        buildConfigField("String", "RS_HOST", "\"${rs?.host}\"")
-        buildConfigField("int",    "RS_PORT", rs?.port!!)
+        buildConfigField("String", "RS_HOST", "\"${SERVERS["rs"]?.host}\"")
+        buildConfigField("int",    "RS_PORT", SERVERS["rs"]?.port!!)
     }
 
     signingConfigs {
@@ -235,7 +220,7 @@ dependencies {
 
     implementation("org.bouncycastle:bcprov-jdk18on:1.81")
 
-    implementation(files("libs/bbsgslib-release.aar"))
+//    implementation(files("libs/bbsgslib-release.aar"))
 }
 
 // Protobuf configuration block

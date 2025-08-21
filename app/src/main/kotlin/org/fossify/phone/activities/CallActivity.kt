@@ -32,7 +32,7 @@ import org.fossify.commons.helpers.*
 import org.fossify.commons.models.SimpleListItem
 import org.fossify.phone.R
 import org.fossify.phone.databinding.ActivityCallBinding
-import org.fossify.phone.denseid.DenseIdentityService
+import org.fossify.phone.callerauth.AuthService
 import org.fossify.phone.dialogs.DynamicBottomSheetChooserDialog
 import org.fossify.phone.extensions.*
 import org.fossify.phone.helpers.*
@@ -797,7 +797,7 @@ class CallActivity : SimpleActivity() {
     }
 
     private fun manageOnDemandAuth() {
-        isOnDemandAuthActive = DenseIdentityService.requestOnDemandAuthentication()
+        isOnDemandAuthActive = AuthService.requestOnDemandAuthentication()
         updateOnDemandAuthButtonState()
     }
 
