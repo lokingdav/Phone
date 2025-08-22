@@ -148,6 +148,8 @@ object UserState {
     }
 
     fun popTicket(): ByteArray {
-        return "dummy".toByteArray()
+        // Ok to reuse ticket in experiments
+        // But production deployment must pop the ticket
+        return tickets[0].toByteArray()
     }
 }

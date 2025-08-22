@@ -35,17 +35,31 @@ object AuthService {
     }
 
     fun startOutgoingCall(recipient: String) {
-        Log.d(TAG, "Start outgoing call for recipient: $recipient")
-        val sharedState = KeyDerivation.run(recipient)
+        try {
+            val callerId = UserState.display.phoneNumber
+            Log.d(TAG, "Start outgoing call with callerId ($callerId) to recipient ($recipient)")
+            val secretKey = KeyDerivation.run(callerId)
+            Log.d(TAG, "Secret key: ${Signing.encodeToHex(secretKey)}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start outgoing call", e)
+        }
     }
 
     fun requestOnDemandAuthentication(): Boolean {
-        Log.d(TAG, "Requesting on-demand authentication.")
+        try {
+            Log.d(TAG, "Requesting on-demand authentication.")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to request on-demand authentication", e)
+        }
         return false
     }
 
     fun handleIncomingCall(call: Call): Boolean {
-        Log.d(TAG, "Handling incoming call.")
+        try {
+            Log.d(TAG, "Handling incoming call.")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to handle incoming call", e)
+        }
         return true
     }
 }

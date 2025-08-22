@@ -7,6 +7,10 @@ data class Scalar(val encoded: ByteArray)
 data class Point(val encoded: ByteArray)
 data class BlindedTicket(val input: ByteArray, val blinded: Point, val blind: Scalar)
 data class Ticket(val t1: ByteArray, val t2: Point) {
+    fun toByteArray(): ByteArray {
+        return t1 + t2.encoded
+    }
+
     fun toJson(): JSONObject {
         return JSONObject().apply {
             put("t1", Signing.encodeToHex(t1))
