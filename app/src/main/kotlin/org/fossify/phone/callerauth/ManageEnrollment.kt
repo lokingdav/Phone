@@ -35,6 +35,7 @@ object ManageEnrollment {
         // Generate signing keypair
         val enrKp = MyKeyPair(Signing.regSigKeygen())
         val amfKp = AMF.keygen()
+        val blindedTickets = VOPRF.generateTicket(1)
 
         // Build the DisplayInformation message
         val iden = Enrollment.DisplayInformation.newBuilder()
@@ -50,6 +51,9 @@ object ManageEnrollment {
             .setIpk(ByteString.copyFrom(enrKp.public.encoded))
             .setIden(iden)
             .setNonce(nonce)
+            .addAllBlindedTickets(blindedTickets.map {
+                ByteString.copyFrom(it.blinded.encoded)
+            })
             .build()
 
         // Sign the exact protobuf bytes
@@ -76,7 +80,8 @@ object ManageEnrollment {
                 logoUrl,
                 enrKp,
                 amfKp,
-                eRes
+                eRes,
+                blindedTickets
             )
             Log.d(TAG, "Enrollment Complete. Happy Calling")
         } catch (e: Exception) {
@@ -91,7 +96,8 @@ object ManageEnrollment {
         logoUrl: String,
         enrKp: MyKeyPair,
         amfKp: AMFKeyPair,
-        eRes: Enrollment.EnrollmentResponse
+        eRes: Enrollment.EnrollmentResponse,
+        blindedTickets: Array<BlindedTicket>
     ) {
         Log.d(TAG, "Constructing User State Object...")
         val display = DisplayInfo(phoneNumber, displayName, logoUrl)
@@ -99,6 +105,9 @@ object ManageEnrollment {
             eRes.sigma.toByteArray(),
             BbsPublicKey(eRes.epk.toByteArray())
         )
+        val tickets = VOPRF.finalizeTickets(blindedTickets, eRes.evaluatedTicketsList.map {
+            Point(it.toByteArray())
+        }.toTypedArray())
 
         UserState.update(
             eId=eRes.eid,
@@ -106,9 +115,16 @@ object ManageEnrollment {
             display=display,
             enrKp=enrKp,
             amfKp=amfKp,
-            signature=signature
+            signature=signature,
+            tickets=tickets
         )
         Log.d(TAG, "\t✅ Success!")
+
+        Log.d(TAG, "Verifying Tickets...")
+        if (!VOPRF.verifyTickets(tickets, eRes.avk.toByteArray())) {
+            throw Exception("tickets failed to verify")
+        }
+        Log.d(TAG, "\t✅ Valid!")
 
         Log.d(TAG, "Verifying Enrollment Credential...")
         // create attributes as array of strings
@@ -123,12 +139,11 @@ object ManageEnrollment {
         // append phoneNumber to every val in attributes
         attributes.forEachIndexed { i, v -> attributes[i] = "$v$phoneNumber" }
 
-        Log.d(TAG, "\tAttributes: ${attributes.joinToString("\n")}")
+        Log.d(TAG, "\tAttributes: \n\t\t${attributes.joinToString("\n\t\t")}")
 
         if (!signature.verify(attributes)) {
             throw Exception("Enrollment signature failed to verify under Registrar 1")
         }
-
         Log.d(TAG, "\t✅ Valid!")
 
         Log.d(TAG, "Saving State...")

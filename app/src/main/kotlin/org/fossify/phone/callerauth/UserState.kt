@@ -2,6 +2,7 @@ package org.fossify.phone.callerauth
 
 import android.util.Log
 import com.google.protobuf.Timestamp
+import org.json.JSONArray
 import org.json.JSONObject
 import java.security.KeyPair
 
@@ -15,6 +16,8 @@ enum class KeyLabel(val code: String) {
     AMF_KP("AMF-KP"),
     ENR_KP("ENR-KP"),
     SIG("SIG"),
+
+    TICKET("TKT"),
     SHARED_STATE("ST")
 }
 
@@ -61,6 +64,7 @@ object UserState {
     lateinit var enrKp: MyKeyPair
 
     lateinit var signature: BbsSignature
+    lateinit var tickets: Array<Ticket>
 
     fun update(
         eId: String,
@@ -68,7 +72,8 @@ object UserState {
         display: DisplayInfo,
         enrKp: MyKeyPair,
         amfKp: AMFKeyPair,
-        signature: BbsSignature
+        signature: BbsSignature,
+        tickets: Array<Ticket>
     ) {
         this.eId = eId
         this.eExp = eExp
@@ -76,6 +81,7 @@ object UserState {
         this.enrKp = enrKp
         this.amfKp = amfKp
         this.signature = signature
+        this.tickets = tickets
     }
 
     fun addSharedState(recipient: String, topic: String, pk: AMFPublicKey, secret: ByteArray): SharedState {
@@ -108,6 +114,7 @@ object UserState {
             put(KeyLabel.AMF_KP.code, amfKp.toJson())
             put(KeyLabel.ENR_KP.code, enrKp.toJson())
             put(KeyLabel.SIG.code, signature.toJson())
+            put(KeyLabel.TICKET.code, tickets.map { it.toJson() })
         }
         return state
     }
@@ -121,13 +128,19 @@ object UserState {
         val data = JSONObject(dataStr)
 
         try {
+            val jsonArray = JSONArray(data.getString(KeyLabel.TICKET.code))
+            val tickets = (0 until jsonArray.length()).map { i ->
+                Ticket.fromJson(jsonArray.getJSONObject(i))
+            }.toTypedArray()
+
             update(
                 eId=data.getString(KeyLabel.EID.code),
                 eExp=Timestamp.parseFrom(Signing.decodeHex(data.getString(KeyLabel.EXP.code))),
                 display=DisplayInfo.fromJson(data.getJSONObject(KeyLabel.DISPLAY_INFO.code)),
                 enrKp=MyKeyPair.fromJson(data.getJSONObject(KeyLabel.ENR_KP.code)),
                 amfKp=AMFKeyPair.fromJson(data.getJSONObject(KeyLabel.AMF_KP.code)),
-                signature=BbsSignature.fromJson(data.getJSONObject(KeyLabel.SIG.code))
+                signature=BbsSignature.fromJson(data.getJSONObject(KeyLabel.SIG.code)),
+                tickets=tickets
             )
         } catch (e: Exception) {
             Log.e(TAG,"Failed to Load $TAG state", e)
