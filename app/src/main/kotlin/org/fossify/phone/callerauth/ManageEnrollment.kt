@@ -81,7 +81,8 @@ object ManageEnrollment {
                 enrKp,
                 amfKp,
                 eRes,
-                blindedTickets
+                blindedTickets,
+                req.nonce
             )
             Log.d(TAG, "Enrollment Complete. Happy Calling")
         } catch (e: Exception) {
@@ -97,7 +98,8 @@ object ManageEnrollment {
         enrKp: MyKeyPair,
         amfKp: AMFKeyPair,
         eRes: Enrollment.EnrollmentResponse,
-        blindedTickets: Array<BlindedTicket>
+        blindedTickets: Array<BlindedTicket>,
+        nonce: String
     ) {
         Log.d(TAG, "Constructing User State Object...")
         val display = DisplayInfo(phoneNumber, displayName, logoUrl)
@@ -134,7 +136,8 @@ object ManageEnrollment {
             displayName,
             logoUrl,
             Signing.encodeToHex(amfKp.public),
-            Signing.encodeToHex(enrKp.public.encoded)
+            Signing.encodeToHex(enrKp.public.encoded),
+            nonce
         )
         // append phoneNumber to every val in attributes
         attributes.forEachIndexed { i, v -> attributes[i] = "$v$phoneNumber" }
