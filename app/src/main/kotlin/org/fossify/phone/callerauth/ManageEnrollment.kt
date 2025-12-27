@@ -4,15 +4,12 @@ import android.util.Log
 import com.google.protobuf.ByteString
 import denseid.enrollment.v1.Enrollment
 import denseid.enrollment.v1.EnrollmentServiceGrpc
-import io.github.lokingdav.libdia.LibDia
 import io.grpc.ManagedChannelBuilder
 import io.grpc.StatusRuntimeException
 import kotlinx.coroutines.coroutineScope
 import org.fossify.phone.BuildConfig
-import java.security.KeyPair
 import java.util.UUID
 import java.util.concurrent.TimeUnit
-import kotlin.math.log
 
 /**
  * Handles key generation, request marshaling, signing over the serialized proto,
@@ -47,7 +44,7 @@ object ManageEnrollment {
         val nonce = UUID.randomUUID().toString()
         val unsigned = Enrollment.EnrollmentRequest.newBuilder()
             .setTn(phoneNumber)
-            .setPk(ByteString.copyFrom(amfKp.public))
+//            .setPk(ByteString.copyFrom(amfKp.public))
             .setIpk(ByteString.copyFrom(enrKp.public.encoded))
             .setIden(iden)
             .setNonce(nonce)

@@ -48,9 +48,6 @@ object AuthService {
             val callerId = UserState.display.phoneNumber // e.g., "+15551234567"
             Log.d(TAG, "Start outgoing call with callerId ($callerId) to recipient ($recipient)")
 
-            val secretKey = KeyDerivation.run(callerId)
-            Log.d(TAG, "Secret key: ${Signing.encodeToHex(secretKey)}")
-
             // Build a simple per-call topic. For POC, concatenate parties + epoch second.
             val topic = "call:${callerId}->${recipient}:${System.currentTimeMillis()/1000}"
             val ticket = UserState.popTicket()

@@ -21,22 +21,10 @@ val SERVERS: Map<String, Server> = mapOf(
         port = System.getenv("ES_PORT") ?: "50051"
     ),
 
-    // Key Derivation Server
-    "ks" to Server(
-        host = System.getenv("KS_HOST") ?: defaultHost,
-        port = System.getenv("KS_PORT") ?: "50052"
-    ),
-
     // Relay Server
     "rs" to Server(
         host = System.getenv("RS_HOST") ?: defaultHost,
         port = System.getenv("RS_PORT") ?: "50053"
-    ),
-
-    // Revocation Server
-    "rv" to Server(
-        host = System.getenv("RV_HOST") ?: defaultHost,
-        port = System.getenv("RV_PORT") ?: "50054"
     )
 )
 
@@ -67,14 +55,6 @@ android {
         // Enrollment Servers
         buildConfigField("String", "ES_HOST", "\"${SERVERS["es"]?.host}\"")
         buildConfigField("int",    "ES_PORT", SERVERS["es"]?.port!!)
-
-        // Key Derivation Servers
-        buildConfigField("String", "KS_HOST", "\"${SERVERS["ks"]?.host}\"")
-        buildConfigField("int",    "KS_PORT", SERVERS["ks"]?.port!!)
-
-        // Revocation Servers
-        buildConfigField("String", "RV_HOST", "\"${SERVERS["rv"]?.host}\"")
-        buildConfigField("int",    "RV_PORT", SERVERS["rv"]?.port!!)
 
         // Relay Server
         buildConfigField("String", "RS_HOST", "\"${SERVERS["rs"]?.host}\"")
