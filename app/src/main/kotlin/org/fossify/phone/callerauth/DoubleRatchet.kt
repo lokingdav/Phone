@@ -9,12 +9,35 @@ import org.bouncycastle.crypto.params.HKDFParameters
 import org.bouncycastle.crypto.params.KeyParameter
 import org.bouncycastle.crypto.params.X25519PrivateKeyParameters
 import org.bouncycastle.crypto.params.X25519PublicKeyParameters
+import org.json.JSONObject
 import java.security.SecureRandom
 import java.util.concurrent.locks.ReentrantLock
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 import kotlin.concurrent.withLock
+
+/**
+ * Double Ratchet keypair for secure messaging.
+ */
+data class DrKeyPair(val private: ByteArray, val public: ByteArray) {
+    fun toJson(): JSONObject {
+        val data = JSONObject().apply {
+            put("pk", Signing.encodeToHex(public))
+            put("sk", Signing.encodeToHex(private))
+        }
+        return data
+    }
+
+    companion object {
+        fun fromJson(data: JSONObject): DrKeyPair {
+            return DrKeyPair(
+                Signing.decodeHex(data.getString("sk")),
+                Signing.decodeHex(data.getString("pk"))
+            )
+        }
+    }
+}
 
 /**
  * Double Ratchet implementation compatible with status-im/doubleratchet Go library.

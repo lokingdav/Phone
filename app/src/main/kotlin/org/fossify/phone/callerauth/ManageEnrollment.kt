@@ -29,9 +29,11 @@ object ManageEnrollment {
     ) = coroutineScope {
         Log.d(TAG, "▶ enroll() start for $phoneNumber")
 
-        // Generate signing keypair
+        // Generate all keypairs
         val enrKp = MyKeyPair(Signing.regSigKeygen())
         val amfKp = AMF.keygen()
+        val (pkeSk, pkePk) = Pke.keygen()
+        val (drSk, drPk) = DoubleRatchet.keygen()
         val blindedTickets = VOPRF.generateTicket(1)
 
         // Build the DisplayInformation message
@@ -44,8 +46,10 @@ object ManageEnrollment {
         val nonce = UUID.randomUUID().toString()
         val unsigned = Enrollment.EnrollmentRequest.newBuilder()
             .setTn(phoneNumber)
-//            .setPk(ByteString.copyFrom(amfKp.public))
             .setIpk(ByteString.copyFrom(enrKp.public.encoded))
+            .setAmfPk(ByteString.copyFrom(amfKp.public))
+            .setPkePk(ByteString.copyFrom(pkePk))
+            .setDrPk(ByteString.copyFrom(drPk))
             .setIden(iden)
             .setNonce(nonce)
             .addAllBlindedTickets(blindedTickets.map {
@@ -77,6 +81,8 @@ object ManageEnrollment {
                 logoUrl,
                 enrKp,
                 amfKp,
+                PkeKeyPair(pkeSk, pkePk),
+                DrKeyPair(drSk, drPk),
                 eRes,
                 blindedTickets,
                 req.nonce
@@ -94,6 +100,8 @@ object ManageEnrollment {
         logoUrl: String,
         enrKp: MyKeyPair,
         amfKp: AMFKeyPair,
+        pkeKp: PkeKeyPair,
+        drKp: DrKeyPair,
         eRes: Enrollment.EnrollmentResponse,
         blindedTickets: Array<BlindedTicket>,
         nonce: String
@@ -114,6 +122,8 @@ object ManageEnrollment {
             display=display,
             enrKp=enrKp,
             amfKp=amfKp,
+            pkeKp=pkeKp,
+            drKp=drKp,
             signature=signature,
             tickets=tickets
         )

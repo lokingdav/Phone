@@ -6,10 +6,33 @@ import org.bouncycastle.crypto.params.HKDFParameters
 import org.bouncycastle.crypto.params.X25519PrivateKeyParameters
 import org.bouncycastle.crypto.params.X25519PublicKeyParameters
 import org.bouncycastle.util.encoders.Hex
+import org.json.JSONObject
 import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
+
+/**
+ * PKE keypair for public key encryption.
+ */
+data class PkeKeyPair(val private: ByteArray, val public: ByteArray) {
+    fun toJson(): JSONObject {
+        val data = JSONObject().apply {
+            put("pk", Signing.encodeToHex(public))
+            put("sk", Signing.encodeToHex(private))
+        }
+        return data
+    }
+
+    companion object {
+        fun fromJson(data: JSONObject): PkeKeyPair {
+            return PkeKeyPair(
+                Signing.decodeHex(data.getString("sk")),
+                Signing.decodeHex(data.getString("pk"))
+            )
+        }
+    }
+}
 
 /**
  * ECIES-style Public Key Encryption using X25519 and AES-256-GCM.

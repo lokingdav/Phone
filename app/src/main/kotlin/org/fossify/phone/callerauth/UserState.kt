@@ -15,6 +15,8 @@ enum class KeyLabel(val code: String) {
     EXP("EXP"),
     AMF_KP("AMF-KP"),
     ENR_KP("ENR-KP"),
+    PKE_KP("PKE-KP"),
+    DR_KP("DR-KP"),
     SIG("SIG"),
 
     TICKET("TKT"),
@@ -62,6 +64,8 @@ object UserState {
     lateinit var display: DisplayInfo
     lateinit var amfKp: AMFKeyPair
     lateinit var enrKp: MyKeyPair
+    lateinit var pkeKp: PkeKeyPair
+    lateinit var drKp: DrKeyPair
 
     lateinit var signature: BbsSignature
     lateinit var tickets: Array<Ticket>
@@ -72,6 +76,8 @@ object UserState {
         display: DisplayInfo,
         enrKp: MyKeyPair,
         amfKp: AMFKeyPair,
+        pkeKp: PkeKeyPair,
+        drKp: DrKeyPair,
         signature: BbsSignature,
         tickets: Array<Ticket>
     ) {
@@ -80,6 +86,8 @@ object UserState {
         this.display = display
         this.enrKp = enrKp
         this.amfKp = amfKp
+        this.pkeKp = pkeKp
+        this.drKp = drKp
         this.signature = signature
         this.tickets = tickets
     }
@@ -113,6 +121,8 @@ object UserState {
             put(KeyLabel.EXP.code, Signing.encodeToHex(eExp.toByteArray()))
             put(KeyLabel.AMF_KP.code, amfKp.toJson())
             put(KeyLabel.ENR_KP.code, enrKp.toJson())
+            put(KeyLabel.PKE_KP.code, pkeKp.toJson())
+            put(KeyLabel.DR_KP.code, drKp.toJson())
             put(KeyLabel.SIG.code, signature.toJson())
             put(KeyLabel.TICKET.code, tickets.map { it.toJson() })
         }
@@ -139,6 +149,8 @@ object UserState {
                 display=DisplayInfo.fromJson(data.getJSONObject(KeyLabel.DISPLAY_INFO.code)),
                 enrKp=MyKeyPair.fromJson(data.getJSONObject(KeyLabel.ENR_KP.code)),
                 amfKp=AMFKeyPair.fromJson(data.getJSONObject(KeyLabel.AMF_KP.code)),
+                pkeKp=PkeKeyPair.fromJson(data.getJSONObject(KeyLabel.PKE_KP.code)),
+                drKp=DrKeyPair.fromJson(data.getJSONObject(KeyLabel.DR_KP.code)),
                 signature=BbsSignature.fromJson(data.getJSONObject(KeyLabel.SIG.code)),
                 tickets=tickets
             )
