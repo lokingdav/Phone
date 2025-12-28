@@ -45,9 +45,9 @@ class EnrollmentDialogFragment : DialogFragment() {
         val dialog = dialog as? AlertDialog
 
         if (org.fossify.phone.BuildConfig.DEBUG) {
-            phoneNumberInput.setText("+15551234567")
-            displayNameInput.setText("Janet Denver")
-            logoUrlInput.setText("https://avatar.iran.liara.run/public/54")
+            phoneNumberInput.setText("bob")
+            displayNameInput.setText("bob")
+            logoUrlInput.setText("https://avatar.iran.liara.run/public/${(1..100).random()}")
         }
 
         dialog?.let {

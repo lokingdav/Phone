@@ -10,6 +10,10 @@ data class BbsSignature(val signature: ByteArray, val publicKey: BbsPublicKey) {
         return LibDia.bbsVerify(msgs, publicKey.encoded, signature)
     }
 
+    fun verify(messages: Array<ByteArray>): Boolean {
+        return LibDia.bbsVerify(messages, publicKey.encoded, signature)
+    }
+
     fun toJson(): JSONObject {
         val data = JSONObject().apply {
             put("sig", Signing.encodeToHex(signature))

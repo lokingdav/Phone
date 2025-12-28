@@ -24,7 +24,7 @@ val SERVERS: Map<String, Server> = mapOf(
     // Relay Server
     "rs" to Server(
         host = System.getenv("RS_HOST") ?: defaultHost,
-        port = System.getenv("RS_PORT") ?: "50053"
+        port = System.getenv("RS_PORT") ?: "50052"
     )
 )
 

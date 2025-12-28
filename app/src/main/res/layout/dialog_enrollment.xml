@@ -23,7 +23,7 @@
             android:layout_marginTop="16dp"
             android:autofillHints="phone"
             android:hint="Phone Number (e.g., +15551234567)"
-            android:inputType="phone" />
+            android:inputType="text" />
 
         <EditText
             android:id="@+id/display_name_input"

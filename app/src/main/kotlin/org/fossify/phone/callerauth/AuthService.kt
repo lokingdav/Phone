@@ -15,7 +15,7 @@ object AuthService {
     // Current out-of-band controller for the active call (if any)
     @Volatile private var oob: OobController? = null
 
-    // Remember who we’re talking to for topic derivation (simple POC)
+    // Remember who we're talking to for topic derivation (simple POC)
     @Volatile private var currentPeerE164: String? = null
     @Volatile private var currentTopic: String? = null
 

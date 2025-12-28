@@ -136,23 +136,21 @@ object ManageEnrollment {
         Log.d(TAG, "\t✅ Valid!")
 
         Log.d(TAG, "Verifying Enrollment Credential...")
-        // create attributes as array of strings
-        val attributes = arrayOf(
-            eRes.eid,
-            Signing.encodeToHex(eRes.exp.toByteArray()),
-            displayName,
-            logoUrl,
-            Signing.encodeToHex(amfKp.public),
-            Signing.encodeToHex(enrKp.public.encoded),
-            nonce
+        // Server signs over 2 messages:
+        // message1 = hash(amf_pk || pke_pk || dr_pk || expiration_bytes || telephone_number)
+        // message2 = display_name
+        val expirationBytes = eRes.exp.toByteArray()
+        val message1 = Utilities.hashAll(
+            amfKp.public,
+            pkeKp.public,
+            drKp.public,
+            expirationBytes,
+            phoneNumber.toByteArray(Charsets.UTF_8)
         )
-        // append phoneNumber to every val in attributes
-        attributes.forEachIndexed { i, v -> attributes[i] = "$v$phoneNumber" }
+        val message2 = displayName.toByteArray(Charsets.UTF_8)
 
-        Log.d(TAG, "\tAttributes: \n\t\t${attributes.joinToString("\n\t\t")}")
-
-        if (!signature.verify(attributes)) {
-            throw Exception("Enrollment signature failed to verify under Registrar 1")
+        if (!signature.verify(arrayOf(message1, message2))) {
+            throw Exception("Enrollment signature failed to verify under Registrar")
         }
         Log.d(TAG, "\t✅ Valid!")
 

@@ -33,4 +33,12 @@ object AMF {
         val (sk, pk) = LibDia.amfKeygen()
         return AMFKeyPair(sk, pk)
     }
+
+    fun sign(senderSk: ByteArray, receiverPk: ByteArray, judgePk: ByteArray, message: ByteArray): ByteArray {
+        return LibDia.amfFrank(senderSk, receiverPk, judgePk, message)
+    }
+
+    fun verify(senderPk: ByteArray, receiverSk: ByteArray, judgePk: ByteArray, message: ByteArray, signature: ByteArray): Boolean {
+        return LibDia.amfVerify(senderPk, receiverSk, judgePk, message, signature)
+    }
 }
