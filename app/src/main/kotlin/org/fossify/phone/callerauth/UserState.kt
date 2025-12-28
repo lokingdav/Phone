@@ -18,6 +18,7 @@ enum class KeyLabel(val code: String) {
     PKE_KP("PKE-KP"),
     DR_KP("DR-KP"),
     SIG("SIG"),
+    MODERATOR_PK("MPK"),
 
     TICKET("TKT"),
     SHARED_STATE("ST")
@@ -66,6 +67,7 @@ object UserState {
     lateinit var enrKp: MyKeyPair
     lateinit var pkeKp: PkeKeyPair
     lateinit var drKp: DrKeyPair
+    lateinit var moderatorPublicKey: ByteArray
 
     lateinit var signature: BbsSignature
     lateinit var tickets: Array<Ticket>
@@ -78,6 +80,7 @@ object UserState {
         amfKp: AMFKeyPair,
         pkeKp: PkeKeyPair,
         drKp: DrKeyPair,
+        moderatorPublicKey: ByteArray,
         signature: BbsSignature,
         tickets: Array<Ticket>
     ) {
@@ -88,6 +91,7 @@ object UserState {
         this.amfKp = amfKp
         this.pkeKp = pkeKp
         this.drKp = drKp
+        this.moderatorPublicKey = moderatorPublicKey
         this.signature = signature
         this.tickets = tickets
     }
@@ -123,6 +127,7 @@ object UserState {
             put(KeyLabel.ENR_KP.code, enrKp.toJson())
             put(KeyLabel.PKE_KP.code, pkeKp.toJson())
             put(KeyLabel.DR_KP.code, drKp.toJson())
+            put(KeyLabel.MODERATOR_PK.code, Signing.encodeToHex(moderatorPublicKey))
             put(KeyLabel.SIG.code, signature.toJson())
             put(KeyLabel.TICKET.code, tickets.map { it.toJson() })
         }
@@ -151,6 +156,7 @@ object UserState {
                 amfKp=AMFKeyPair.fromJson(data.getJSONObject(KeyLabel.AMF_KP.code)),
                 pkeKp=PkeKeyPair.fromJson(data.getJSONObject(KeyLabel.PKE_KP.code)),
                 drKp=DrKeyPair.fromJson(data.getJSONObject(KeyLabel.DR_KP.code)),
+                moderatorPublicKey=Signing.decodeHex(data.getString(KeyLabel.MODERATOR_PK.code)),
                 signature=BbsSignature.fromJson(data.getJSONObject(KeyLabel.SIG.code)),
                 tickets=tickets
             )

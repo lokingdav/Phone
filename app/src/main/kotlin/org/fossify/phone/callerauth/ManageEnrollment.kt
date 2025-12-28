@@ -124,6 +124,7 @@ object ManageEnrollment {
             amfKp=amfKp,
             pkeKp=pkeKp,
             drKp=drKp,
+            moderatorPublicKey=eRes.mpk.toByteArray(),
             signature=signature,
             tickets=tickets
         )
