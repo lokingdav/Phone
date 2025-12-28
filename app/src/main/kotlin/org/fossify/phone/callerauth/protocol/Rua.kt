@@ -11,12 +11,13 @@ import org.fossify.phone.callerauth.Utilities
  * RUA is the second phase after AKE, providing Right-to-Use (RTU) credential 
  * verification with call reason and display name.
  * 
- * Key difference from AKE: RUA uses AMF (Authenticated Message Franking) signatures
- * to enable moderation/reporting capabilities.
+ * Key difference from AKE: 
+ * - RUA uses AMF (Authenticated Message Franking) signatures for moderation
+ * - RUA messages are encrypted using Double Ratchet session established in AKE
  * 
  * Protocol Flow:
- * 1. Caller: initRua() -> ruaRequest() -> sends RuaMessage to recipient
- * 2. Recipient: ruaResponse() -> verifies RTU and responds -> sends RuaMessage back
+ * 1. Caller: initRua() -> ruaRequest() -> sends RuaMessage (DR encrypted) to recipient
+ * 2. Recipient: ruaResponse() -> verifies RTU and responds -> sends RuaMessage (DR encrypted) back
  * 3. Caller: ruaFinalize() -> verifies response, establishes final shared key
  * 
  * All messages are signed with AMF using:
@@ -99,14 +100,26 @@ object Rua {
      * Creates an RUA request message (caller side).
      * 
      * Per Go implementation: Sign MarshalDDA(ruaMsg) with AMF.
+     * Message is encrypted using the Double Ratchet session.
      * 
-     * @param callState The call state
+     * @param callState The call state with DR session
      * @param reason The call reason to include
-     * @return RuaMessage protobuf to send to recipient
+     * @return Serialized ProtocolMessage bytes (DR encrypted), or null on failure
      */
-    fun ruaRequest(callState: CallState, reason: String): Protocol.RuaMessage? {
+    fun ruaRequest(callState: CallState, reason: String): ByteArray? {
         val config = callState.config ?: return null
-        val counterpartAmfPk = callState.counterpartAmfPk ?: return null
+        val counterpartAmfPk = callState.counterpartAmfPk
+        val drSession = callState.drSession
+        
+        if (counterpartAmfPk.isEmpty()) {
+            android.util.Log.e(TAG, "Counterpart AMF public key not available")
+            return null
+        }
+        
+        if (drSession == null) {
+            android.util.Log.e(TAG, "DR session not initialized - AKE must complete first")
+            return null
+        }
         
         // Ensure RUA is initialized
         if (callState.rua.topic.isEmpty()) {
@@ -154,7 +167,15 @@ object Rua {
         callState.transitionToRua(callState.rua.topic)
         
         android.util.Log.d(TAG, "Created RUA request with reason: $reason")
-        return signedRuaMsg
+        
+        // Return serialized ProtocolMessage with DR encryption
+        return ProtocolMessages.createRuaMessage(
+            callState.senderId,
+            topic,
+            Protocol.MessageType.RUA_REQUEST,
+            signedRuaMsg,
+            drSession
+        )
     }
     
     /**
@@ -232,12 +253,26 @@ object Rua {
      * - Create response with own RTU
      * - Sign response with AMF over {DhPk, Rtu, Misc=ddA}
      * 
-     * @param callState The call state
-     * @param incomingMessage The received RUA request from caller
-     * @return RuaMessage protobuf to send back, or null if verification fails
+     * @param callState The call state with DR session
+     * @param incomingProtocolMsg The received ProtocolMessage (DR encrypted)
+     * @return Serialized ProtocolMessage bytes (DR encrypted), or null if verification fails
      */
-    fun ruaResponse(callState: CallState, incomingMessage: Protocol.RuaMessage): Protocol.RuaMessage? {
+    fun ruaResponse(callState: CallState, incomingProtocolMsg: Protocol.ProtocolMessage): ByteArray? {
         val config = callState.config ?: return null
+        val drSession = callState.drSession
+        
+        if (drSession == null) {
+            android.util.Log.e(TAG, "DR session not initialized - AKE must complete first")
+            return null
+        }
+        
+        // Decrypt and parse the RUA request
+        val incomingMessage = try {
+            ProtocolMessages.decodeRuaPayload(incomingProtocolMsg, drSession)
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "Failed to decode RUA request: ${e.message}")
+            return null
+        }
         
         // Get caller's telephone number (source of the call)
         val callerTn = callState.src
@@ -278,7 +313,7 @@ object Rua {
         val sigma = try {
             AMF.sign(
                 config.amfPrivateKey,
-                callState.counterpartAmfPk!!,
+                callState.counterpartAmfPk,
                 config.moderatorPublicKey,
                 ddB
             )
@@ -312,8 +347,20 @@ object Rua {
             .setSigma(ByteString.copyFrom(sigma))
             .build()
         
+        // Transition to RUA topic
+        val topic = Utilities.encodeToHex(callState.rua.topic)
+        callState.transitionToRua(callState.rua.topic)
+        
         android.util.Log.d(TAG, "Created RUA response, shared key established")
-        return signedReply
+        
+        // Return serialized ProtocolMessage with DR encryption
+        return ProtocolMessages.createRuaMessage(
+            callState.senderId,
+            topic,
+            Protocol.MessageType.RUA_RESPONSE,
+            signedReply,
+            drSession
+        )
     }
     
     /**
@@ -324,12 +371,26 @@ object Rua {
      * - Verify that Misc matches our original request's DDA
      * - Compute shared key
      * 
-     * @param callState The call state
-     * @param responseMessage The RUA response from recipient
+     * @param callState The call state with DR session
+     * @param responseProtocolMsg The ProtocolMessage from recipient (DR encrypted)
      * @return true if successful, false if verification fails
      */
-    fun ruaFinalize(callState: CallState, responseMessage: Protocol.RuaMessage): Boolean {
+    fun ruaFinalize(callState: CallState, responseProtocolMsg: Protocol.ProtocolMessage): Boolean {
         val config = callState.config ?: return false
+        val drSession = callState.drSession
+        
+        if (drSession == null) {
+            android.util.Log.e(TAG, "DR session not initialized")
+            return false
+        }
+        
+        // Decrypt and parse the RUA response
+        val responseMessage = try {
+            ProtocolMessages.decodeRuaPayload(responseProtocolMsg, drSession)
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "Failed to decode RUA response: ${e.message}")
+            return false
+        }
         
         // Get recipient's telephone number (destination of the call)
         val recipientTn = callState.dst

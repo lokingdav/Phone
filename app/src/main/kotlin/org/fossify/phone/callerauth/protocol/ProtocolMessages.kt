@@ -55,14 +55,20 @@ object ProtocolMessages {
 
     /**
      * Extracts RuaMessage from ProtocolMessage payload.
-     * If sharedKey is provided, the payload is decrypted first using symmetric encryption.
+     * Uses Double Ratchet session to decrypt if provided.
      */
-    fun decodeRuaPayload(msg: Protocol.ProtocolMessage, sharedKey: ByteArray? = null): Protocol.RuaMessage {
-        var payloadBytes = msg.payload.toByteArray()
+    fun decodeRuaPayload(
+        msg: Protocol.ProtocolMessage,
+        drSession: DrSession? = null
+    ): Protocol.RuaMessage {
+        val payloadBytes = msg.payload.toByteArray()
 
-        // If shared key is provided, decrypt the payload first
-        if (sharedKey != null && sharedKey.isNotEmpty()) {
-            payloadBytes = SymmetricEncryption.decrypt(sharedKey, payloadBytes)
+        // If DR session is provided, decrypt the payload using Double Ratchet
+        if (drSession != null) {
+            val drMessage = Protocol.DrMessage.parseFrom(payloadBytes)
+            val associatedData = msg.topic.toByteArray()
+            val decrypted = DoubleRatchet.decrypt(drSession, drMessage, associatedData)
+            return Protocol.RuaMessage.parseFrom(decrypted)
         }
 
         return Protocol.RuaMessage.parseFrom(payloadBytes)
@@ -134,23 +140,25 @@ object ProtocolMessages {
 
     /**
      * Creates an RUA protocol message.
-     * If sharedKey is provided, the payload is encrypted using symmetric encryption.
+     * Uses Double Ratchet session to encrypt the payload.
      */
     fun createRuaMessage(
         senderId: String,
         topic: String,
         msgType: Protocol.MessageType,
         payload: Protocol.RuaMessage?,
-        sharedKey: ByteArray? = null
+        drSession: DrSession? = null
     ): ByteArray {
         var payloadBytes = ByteArray(0)
 
         if (payload != null) {
             payloadBytes = payload.toByteArray()
 
-            // Encrypt payload if shared key is provided
-            if (sharedKey != null && sharedKey.isNotEmpty()) {
-                payloadBytes = SymmetricEncryption.encrypt(sharedKey, payloadBytes)
+            // Encrypt payload using Double Ratchet if session is provided
+            if (drSession != null) {
+                val associatedData = topic.toByteArray()
+                val drMessage = DoubleRatchet.encrypt(drSession, payloadBytes, associatedData)
+                payloadBytes = drMessage.toByteArray()
             }
         }
 

@@ -73,8 +73,9 @@ class ProtocolHandler(
     
     /**
      * Step 3 (Caller): Create RUA request with call reason.
+     * Returns serialized ProtocolMessage bytes (DR encrypted).
      */
-    fun callerCreateRuaRequest(reason: String): Protocol.RuaMessage? {
+    fun callerCreateRuaRequest(reason: String): ByteArray? {
         if (currentPhase != Phase.AKE_COMPLETE) {
             throw IllegalStateException("AKE must be complete before starting RUA")
         }
@@ -90,15 +91,16 @@ class ProtocolHandler(
     
     /**
      * Step 4 (Caller): Process RUA response and complete protocol.
+     * @param responseProtocolMsg The RUA response ProtocolMessage (DR encrypted)
      */
-    fun callerProcessRuaResponse(response: Protocol.RuaMessage): Boolean {
+    fun callerProcessRuaResponse(responseProtocolMsg: Protocol.ProtocolMessage): Boolean {
         if (currentPhase != Phase.RUA_INITIATED) {
             lastError = "Invalid phase for processing RUA response: $currentPhase"
             currentPhase = Phase.ERROR
             return false
         }
         
-        val success = Rua.ruaFinalize(callState, response)
+        val success = Rua.ruaFinalize(callState, responseProtocolMsg)
         if (success) {
             currentPhase = Phase.SECURE_CHANNEL_ESTABLISHED
             android.util.Log.d(tag, "Caller: Protocol complete, secure channel established")
@@ -164,8 +166,10 @@ class ProtocolHandler(
     
     /**
      * Step 2 (Recipient): Process incoming RUA request and create response.
+     * @param requestProtocolMsg The RUA request ProtocolMessage (DR encrypted)
+     * @return Serialized ProtocolMessage bytes (DR encrypted), or null on failure
      */
-    fun recipientProcessRuaRequest(request: Protocol.RuaMessage): Protocol.RuaMessage? {
+    fun recipientProcessRuaRequest(requestProtocolMsg: Protocol.ProtocolMessage): ByteArray? {
         if (currentPhase != Phase.AKE_COMPLETE) {
             lastError = "AKE must be complete before processing RUA"
             currentPhase = Phase.ERROR
@@ -174,7 +178,7 @@ class ProtocolHandler(
         
         Rua.initRua(callState)
         
-        val response = Rua.ruaResponse(callState, request)
+        val response = Rua.ruaResponse(callState, requestProtocolMsg)
         if (response != null) {
             currentPhase = Phase.SECURE_CHANNEL_ESTABLISHED
             android.util.Log.d(tag, "Recipient: RUA response created, secure channel established")
