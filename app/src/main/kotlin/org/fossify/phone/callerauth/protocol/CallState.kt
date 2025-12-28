@@ -1,7 +1,6 @@
 package org.fossify.phone.callerauth.protocol
 
 import denseid.protocol.v1.Protocol
-import org.fossify.phone.callerauth.DrSession
 import org.fossify.phone.callerauth.Utilities
 import java.time.Instant
 import java.time.ZoneOffset

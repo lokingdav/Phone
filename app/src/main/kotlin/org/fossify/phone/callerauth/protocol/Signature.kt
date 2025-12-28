@@ -1,5 +1,6 @@
-package org.fossify.phone.callerauth
+package org.fossify.phone.callerauth.protocol
 
+import org.fossify.phone.callerauth.protocol.Signing
 import org.json.JSONObject
 import java.security.PublicKey
 

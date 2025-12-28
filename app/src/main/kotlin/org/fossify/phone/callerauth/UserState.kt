@@ -2,9 +2,16 @@ package org.fossify.phone.callerauth
 
 import android.util.Log
 import com.google.protobuf.Timestamp
+import org.fossify.phone.callerauth.protocol.AMFKeyPair
+import org.fossify.phone.callerauth.protocol.AMFPublicKey
+import org.fossify.phone.callerauth.protocol.BbsSignature
+import org.fossify.phone.callerauth.protocol.DrKeyPair
+import org.fossify.phone.callerauth.protocol.MyKeyPair
+import org.fossify.phone.callerauth.protocol.PkeKeyPair
+import org.fossify.phone.callerauth.protocol.Signing
+import org.fossify.phone.callerauth.protocol.Ticket
 import org.json.JSONArray
 import org.json.JSONObject
-import java.security.KeyPair
 
 private const val TAG = "CallAuth-UserState"
 
@@ -152,12 +159,12 @@ object UserState {
                 eId=data.getString(KeyLabel.EID.code),
                 eExp=Timestamp.parseFrom(Signing.decodeHex(data.getString(KeyLabel.EXP.code))),
                 display=DisplayInfo.fromJson(data.getJSONObject(KeyLabel.DISPLAY_INFO.code)),
-                enrKp=MyKeyPair.fromJson(data.getJSONObject(KeyLabel.ENR_KP.code)),
-                amfKp=AMFKeyPair.fromJson(data.getJSONObject(KeyLabel.AMF_KP.code)),
-                pkeKp=PkeKeyPair.fromJson(data.getJSONObject(KeyLabel.PKE_KP.code)),
-                drKp=DrKeyPair.fromJson(data.getJSONObject(KeyLabel.DR_KP.code)),
-                moderatorPublicKey=Signing.decodeHex(data.getString(KeyLabel.MODERATOR_PK.code)),
-                signature=BbsSignature.fromJson(data.getJSONObject(KeyLabel.SIG.code)),
+                enrKp= MyKeyPair.fromJson(data.getJSONObject(KeyLabel.ENR_KP.code)),
+                amfKp= AMFKeyPair.fromJson(data.getJSONObject(KeyLabel.AMF_KP.code)),
+                pkeKp= PkeKeyPair.fromJson(data.getJSONObject(KeyLabel.PKE_KP.code)),
+                drKp= DrKeyPair.fromJson(data.getJSONObject(KeyLabel.DR_KP.code)),
+                moderatorPublicKey= Signing.decodeHex(data.getString(KeyLabel.MODERATOR_PK.code)),
+                signature= BbsSignature.fromJson(data.getJSONObject(KeyLabel.SIG.code)),
                 tickets=tickets
             )
         } catch (e: Exception) {

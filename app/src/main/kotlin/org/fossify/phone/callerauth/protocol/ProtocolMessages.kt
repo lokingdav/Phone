@@ -2,7 +2,6 @@ package org.fossify.phone.callerauth.protocol
 
 import com.google.protobuf.ByteString
 import denseid.protocol.v1.Protocol
-import org.fossify.phone.callerauth.Pke
 
 /**
  * Message type constants for convenience.

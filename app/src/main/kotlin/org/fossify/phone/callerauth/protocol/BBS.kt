@@ -1,6 +1,7 @@
-package org.fossify.phone.callerauth
+package org.fossify.phone.callerauth.protocol
 
 import io.github.lokingdav.libdia.LibDia
+import org.fossify.phone.callerauth.protocol.Signing
 import org.json.JSONObject
 
 data class  BbsPublicKey(val encoded: ByteArray)

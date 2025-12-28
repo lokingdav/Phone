@@ -1,8 +1,6 @@
 package org.fossify.phone.callerauth.protocol
 
 import denseid.protocol.v1.Protocol
-import org.fossify.phone.callerauth.DoubleRatchet
-import org.fossify.phone.callerauth.Utilities
 
 /**
  * High-level protocol handler that orchestrates AKE and RUA flows.

@@ -1,4 +1,4 @@
-package org.fossify.phone.callerauth
+package org.fossify.phone.callerauth.protocol
 
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.security.KeyFactory
@@ -10,7 +10,6 @@ import java.security.Security
 import java.security.Signature
 import java.security.spec.PKCS8EncodedKeySpec
 import java.security.spec.X509EncodedKeySpec
-
 
 object Signing {
     private const val ALGORITHM = "Ed25519"

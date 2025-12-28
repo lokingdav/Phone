@@ -2,7 +2,6 @@ package org.fossify.phone.callerauth.protocol
 
 import denseid.protocol.v1.Protocol
 import io.github.lokingdav.libdia.LibDia
-import org.fossify.phone.callerauth.DoubleRatchet
 import org.fossify.phone.callerauth.Utilities
 
 /**

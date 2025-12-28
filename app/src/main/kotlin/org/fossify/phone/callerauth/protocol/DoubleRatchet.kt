@@ -1,5 +1,6 @@
-package org.fossify.phone.callerauth
+package org.fossify.phone.callerauth.protocol
 
+import com.google.protobuf.ByteString
 import denseid.protocol.v1.Protocol
 import org.bouncycastle.crypto.agreement.X25519Agreement
 import org.bouncycastle.crypto.digests.SHA256Digest
@@ -9,6 +10,7 @@ import org.bouncycastle.crypto.params.HKDFParameters
 import org.bouncycastle.crypto.params.KeyParameter
 import org.bouncycastle.crypto.params.X25519PrivateKeyParameters
 import org.bouncycastle.crypto.params.X25519PublicKeyParameters
+import org.fossify.phone.callerauth.protocol.Signing
 import org.json.JSONObject
 import java.security.SecureRandom
 import java.util.concurrent.locks.ReentrantLock
@@ -162,7 +164,7 @@ object DoubleRatchet {
 
             // Build the header
             val header = Protocol.DrHeader.newBuilder()
-                .setDh(com.google.protobuf.ByteString.copyFrom(state.dhKeyPair.publicKey))
+                .setDh(ByteString.copyFrom(state.dhKeyPair.publicKey))
                 .setN(state.sendingMessageNumber.toInt())
                 .setPn(state.previousChainLength.toInt())
                 .build()
@@ -171,7 +173,7 @@ object DoubleRatchet {
 
             Protocol.DrMessage.newBuilder()
                 .setHeader(header)
-                .setCiphertext(com.google.protobuf.ByteString.copyFrom(ciphertext))
+                .setCiphertext(ByteString.copyFrom(ciphertext))
                 .build()
         }
     }

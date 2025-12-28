@@ -1,11 +1,12 @@
-package org.fossify.phone.callerauth
+package org.fossify.phone.callerauth.protocol
 
 import org.bouncycastle.crypto.agreement.X25519Agreement
+import org.bouncycastle.crypto.digests.SHA256Digest
 import org.bouncycastle.crypto.generators.HKDFBytesGenerator
 import org.bouncycastle.crypto.params.HKDFParameters
 import org.bouncycastle.crypto.params.X25519PrivateKeyParameters
 import org.bouncycastle.crypto.params.X25519PublicKeyParameters
-import org.bouncycastle.util.encoders.Hex
+import org.fossify.phone.callerauth.protocol.Signing
 import org.json.JSONObject
 import java.security.SecureRandom
 import javax.crypto.Cipher
@@ -187,7 +188,7 @@ object Pke {
         System.arraycopy(recipientPublic, 0, info, ephemeralPublic.size, recipientPublic.size)
 
         // HKDF-SHA256 with no salt
-        val hkdf = HKDFBytesGenerator(org.bouncycastle.crypto.digests.SHA256Digest())
+        val hkdf = HKDFBytesGenerator(SHA256Digest())
         hkdf.init(HKDFParameters(sharedSecret, null, info))
 
         val key = ByteArray(AES_KEY_SIZE)
