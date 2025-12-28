@@ -1,15 +1,9 @@
 package org.fossify.phone.callerauth.protocol
 
 import denseid.protocol.v1.Protocol
-import org.bouncycastle.crypto.agreement.X25519Agreement
-import org.bouncycastle.crypto.generators.HKDFBytesGenerator
-import org.bouncycastle.crypto.params.HKDFParameters
-import org.bouncycastle.crypto.params.X25519PrivateKeyParameters
-import org.bouncycastle.crypto.params.X25519PublicKeyParameters
+import io.github.lokingdav.libdia.LibDia
 import org.fossify.phone.callerauth.DoubleRatchet
 import org.fossify.phone.callerauth.Utilities
-import java.security.SecureRandom
-import org.bouncycastle.crypto.digests.SHA256Digest
 
 /**
  * Authenticated Key Exchange (AKE) protocol implementation.
@@ -20,63 +14,66 @@ import org.bouncycastle.crypto.digests.SHA256Digest
  * 
  * Protocol Flow:
  * 1. Caller: initAke() -> akeRequest() -> sends AkeMessage to recipient
- * 2. Recipient: initAke() -> akeResponse() -> sends AkeMessage back to caller
+ * 2. Recipient: initAke() -> akeResponse() -> sends AkeMessage back to caller  
  * 3. Caller: akeComplete() -> computes shared key, inits DR as caller
  * 4. Recipient: akeFinalize() -> computes shared key, inits DR as recipient
  */
 object Ake {
     private const val TAG = "Ake"
     
-    // AKE info strings for HKDF key derivation (must match Go implementation)
-    private const val AKE_SHARED_KEY_INFO = "ake-shared-key"
-    private const val AKE_DR_KEY_INFO = "ake-dr-key"
-    
-    // Key sizes
-    private const val X25519_KEY_SIZE = 32
-    private const val SHARED_KEY_SIZE = 32
-    
-    /**
-     * Generates a new ephemeral X25519 keypair for AKE.
-     */
-    fun generateEphemeralKeyPair(): Pair<ByteArray, ByteArray> {
-        val random = SecureRandom()
-        val privateKey = X25519PrivateKeyParameters(random)
-        val publicKey = privateKey.generatePublicKey()
-        return Pair(privateKey.encoded, publicKey.encoded)
-    }
-    
     /**
      * Initializes AKE state for a new call.
-     * Generates ephemeral DH keypair and stores in call state.
+     * Generates ephemeral DH keypair using LibDia and stores in call state.
+     * Matches Go: dia.DHKeygen()
      */
     fun initAke(callState: CallState) {
-        val (privateKey, publicKey) = generateEphemeralKeyPair()
-        val topic = Utilities.hash(callState.getAkeLabel())
-        callState.initAke(privateKey, publicKey, topic)
-        android.util.Log.d(TAG, "Initialized AKE with ephemeral public key: ${Utilities.encodeToHex(publicKey).take(16)}...")
+        // Use LibDia for DH keygen (matches Go: dia.DHKeygen())
+        val (dhSk, dhPk) = LibDia.dhKeygen()
+        
+        // Compute AKE topic: HashAll(Src, Ts) as byte arrays
+        // Matches Go: helpers.HashAll([]byte(callState.Src), []byte(callState.Ts))
+        val akeTopic = Utilities.hashAll(
+            callState.src.toByteArray(Charsets.UTF_8),
+            callState.ts.toByteArray(Charsets.UTF_8)
+        )
+        
+        callState.initAke(dhSk, dhPk, akeTopic)
+        android.util.Log.d(TAG, "Initialized AKE with DhPk: ${Utilities.encodeToHex(dhPk).take(16)}...")
     }
     
     /**
      * Creates an AKE request message (caller side).
+     * 
+     * Go equivalent: AkeRequest(caller *CallState) ([]byte, error)
+     * 
+     * Note: AkeRequest does NOT include DhPk - it only sends ZK proof and public keys.
+     * The DhPk is sent later in AkeComplete.
      * 
      * @param callState The call state containing subscriber config and AKE state
      * @return AkeMessage protobuf to send to recipient
      */
     fun akeRequest(callState: CallState): Protocol.AkeMessage {
         val config = callState.config
-        val nonce = callState.ake.topic
+        
+        // Compute challenge: HashAll(topic)
+        // Matches Go: challenge := helpers.HashAll(caller.Ake.Topic)
+        val challenge = Utilities.hashAll(callState.ake.topic)
         
         // Create ZK proof of identity
-        val proof = ZkProofs.createProofFromConfig(config, nonce)
+        val proof = ZkProofs.createProofFromConfig(config, challenge)
         
-        // Build the AKE message (following proto definition)
+        // Store challenge and proof for later verification
+        // Matches Go: caller.UpdateCaller(challenge, proof)
+        callState.updateCaller(challenge, proof)
+        
+        // Build the AKE message - NO DhPk in AkeRequest!
+        // Matches Go: AkeMessage{AmfPk, PkePk, DrPk, Expiration, Proof}
         val akeMessage = Protocol.AkeMessage.newBuilder()
-            .setDhPk(com.google.protobuf.ByteString.copyFrom(callState.ake.dhPk))
             .setAmfPk(com.google.protobuf.ByteString.copyFrom(config.amfPublicKey))
-            .setExpiration(com.google.protobuf.ByteString.copyFrom(config.enExpiration))
-            .setProof(com.google.protobuf.ByteString.copyFrom(proof))
             .setPkePk(com.google.protobuf.ByteString.copyFrom(config.pkePublicKey))
             .setDrPk(com.google.protobuf.ByteString.copyFrom(config.drPublicKey))
+            .setExpiration(com.google.protobuf.ByteString.copyFrom(config.enExpiration))
+            .setProof(com.google.protobuf.ByteString.copyFrom(proof))
             .build()
         
         android.util.Log.d(TAG, "Created AKE request for ${config.myPhone}")
@@ -86,9 +83,11 @@ object Ake {
     /**
      * Processes an incoming AKE request and creates a response (recipient side).
      * 
+     * Go equivalent: AkeResponse(recipient *CallState, callerMsg *ProtocolMessage) ([]byte, error)
+     * 
      * @param callState The call state containing subscriber config and AKE state
      * @param incomingMessage The received AKE request from caller
-     * @param callerPhoneNumber The caller's phone number (from caller ID)
+     * @param callerPhoneNumber The caller's phone number (for ZK proof verification)
      * @return AkeMessage protobuf to send back to caller, or null if verification fails
      */
     fun akeResponse(
@@ -97,12 +96,16 @@ object Ake {
         callerPhoneNumber: String
     ): Protocol.AkeMessage? {
         val config = callState.config
-        val nonce = callState.ake.topic
+        
+        // Compute challenge0: HashAll(topic)
+        // Matches Go: challenge0 := helpers.HashAll(recipient.Ake.Topic)
+        val challenge0 = Utilities.hashAll(callState.ake.topic)
         
         // Verify the incoming proof
+        // Matches Go: VerifyZKProof(caller, recipient.Src, challenge0, recipient.Config.RaPublicKey)
         if (!ZkProofs.verifyProofFromMessage(
             incomingMessage,
-            nonce,
+            challenge0,
             callerPhoneNumber,
             config.raPublicKey
         )) {
@@ -110,22 +113,31 @@ object Ake {
             return null
         }
         
-        // Store peer's public keys
+        // Compute challenge1 for our proof: HashAll(callerProof, recipientDhPk, challenge0)
+        // Matches Go: challenge1 := helpers.HashAll(caller.GetProof(), recipient.Ake.DhPk, challenge0)
+        val callerProof = incomingMessage.proof.toByteArray()
+        val challenge1 = Utilities.hashAll(callerProof, callState.ake.dhPk, challenge0)
+        
+        // Create our ZK proof with challenge1
+        val proof = ZkProofs.createProofFromConfig(config, challenge1)
+        
+        // Store state for AkeFinalize
+        // Matches Go: recipient.Ake.CallerProof, recipient.Ake.RecipientProof, recipient.Counterpart*
+        callState.ake.callerProof = callerProof
+        callState.ake.recipientProof = proof
         callState.counterpartAmfPk = incomingMessage.amfPk.toByteArray()
         callState.counterpartPkePk = incomingMessage.pkePk.toByteArray()
         callState.counterpartDrPk = incomingMessage.drPk.toByteArray()
         
-        // Create our ZK proof
-        val proof = ZkProofs.createProofFromConfig(config, nonce)
-        
-        // Build response message
+        // Build response message - includes DhPk
+        // Matches Go: AkeMessage{DhPk, AmfPk, PkePk, DrPk, Expiration, Proof}
         val responseMessage = Protocol.AkeMessage.newBuilder()
             .setDhPk(com.google.protobuf.ByteString.copyFrom(callState.ake.dhPk))
             .setAmfPk(com.google.protobuf.ByteString.copyFrom(config.amfPublicKey))
-            .setExpiration(com.google.protobuf.ByteString.copyFrom(config.enExpiration))
-            .setProof(com.google.protobuf.ByteString.copyFrom(proof))
             .setPkePk(com.google.protobuf.ByteString.copyFrom(config.pkePublicKey))
             .setDrPk(com.google.protobuf.ByteString.copyFrom(config.drPublicKey))
+            .setExpiration(com.google.protobuf.ByteString.copyFrom(config.enExpiration))
+            .setProof(com.google.protobuf.ByteString.copyFrom(proof))
             .build()
         
         android.util.Log.d(TAG, "Created AKE response for $callerPhoneNumber")
@@ -136,157 +148,178 @@ object Ake {
      * Completes AKE on the caller side after receiving response.
      * Computes shared key and initializes Double Ratchet session.
      * 
+     * Go equivalent: AkeComplete(caller *CallState, recipientMsg *ProtocolMessage) ([]byte, error)
+     * 
      * @param callState The call state
      * @param responseMessage The AKE response from recipient
      * @param recipientPhoneNumber The recipient's phone number
-     * @return true if successful, false if verification fails
+     * @return AkeMessage with both DhPks to send to recipient, or null if verification fails
      */
     fun akeComplete(
         callState: CallState,
         responseMessage: Protocol.AkeMessage,
         recipientPhoneNumber: String
-    ): Boolean {
+    ): Protocol.AkeMessage? {
         val config = callState.config
-        val nonce = callState.ake.topic
+        
+        val recipientDhPk = responseMessage.dhPk.toByteArray()
+        val recipientProof = responseMessage.proof.toByteArray()
+        
+        if (recipientDhPk.isEmpty() || recipientProof.isEmpty()) {
+            android.util.Log.e(TAG, "Missing DhPk or Proof in AkeResponse")
+            return null
+        }
+        
+        // Compute challenge: HashAll(callerProof, recipientDhPk, chal0)
+        // Matches Go: challenge := helpers.HashAll(caller.Ake.CallerProof, recipientDhPk, caller.Ake.Chal0)
+        val challenge = Utilities.hashAll(
+            callState.ake.callerProof,
+            recipientDhPk,
+            callState.ake.chal0
+        )
         
         // Verify the response proof
+        // Matches Go: VerifyZKProof(recipient, caller.Dst, challenge, caller.Config.RaPublicKey)
         if (!ZkProofs.verifyProofFromMessage(
             responseMessage,
-            nonce,
+            challenge,
             recipientPhoneNumber,
             config.raPublicKey
         )) {
             android.util.Log.e(TAG, "AKE response proof verification failed")
-            return false
+            return null
         }
         
         // Store peer's keys
-        val peerDhPk = responseMessage.dhPk.toByteArray()
-        val peerDrPk = responseMessage.drPk.toByteArray()
-        
         callState.counterpartAmfPk = responseMessage.amfPk.toByteArray()
         callState.counterpartPkePk = responseMessage.pkePk.toByteArray()
-        callState.counterpartDrPk = peerDrPk
+        callState.counterpartDrPk = responseMessage.drPk.toByteArray()
         
-        // Compute shared key from ephemeral DH
+        // Compute DH secret using LibDia
+        // Matches Go: secret, err := dia.DHComputeSecret(caller.Ake.DhSk, recipientDhPk)
+        val secret = LibDia.dhComputeSecret(callState.ake.dhSk, recipientDhPk)
+        
+        // Compute shared key: HashAll(topic, callerProof, recipientProof, callerDhPk, recipientDhPk, secret)
+        // Matches Go: ComputeSharedKey(caller.Ake.Topic, caller.Ake.CallerProof, recipientProof, caller.Ake.DhPk, recipientDhPk, secret)
         val sharedKey = computeSharedKey(
-            callState.ake.dhSk,
-            peerDhPk,
+            callState.ake.topic,
+            callState.ake.callerProof,
+            recipientProof,
             callState.ake.dhPk,
-            peerDhPk
+            recipientDhPk,
+            secret
         )
         
-        // Derive DR initialization key
-        val drKey = deriveKey(sharedKey, AKE_DR_KEY_INFO.toByteArray())
-        
-        // Session ID from concatenated ephemeral public keys
-        val sessionId = Utilities.hash(
-            Utilities.concatBytes(callState.ake.dhPk, peerDhPk)
-        )
-        
-        // Initialize Double Ratchet as caller (initiator)
-        val drSession = DoubleRatchet.initAsCaller(
-            sessionId = sessionId,
-            sharedKey = drKey,
-            remoteDrPk = peerDrPk
-        )
-        
-        callState.drSession = drSession
         callState.setSharedKey(sharedKey)
         
-        android.util.Log.d(TAG, "AKE completed as caller, DR session initialized")
-        return true
+        // Initialize Double Ratchet as caller
+        // Matches Go: InitDrSessionAsCaller(caller.Ake.Topic, caller.SharedKey, caller.CounterpartDrPk)
+        val drSession = DoubleRatchet.initAsCaller(
+            sessionId = callState.ake.topic,
+            sharedKey = sharedKey,
+            remoteDrPk = callState.counterpartDrPk
+        )
+        callState.drSession = drSession
+        
+        // Build AkeComplete message with both DhPks concatenated
+        // Matches Go: AkeMessage{DhPk: helpers.ConcatBytes(caller.Ake.DhPk, recipientDhPk)}
+        val combinedDhPk = Utilities.concatBytes(callState.ake.dhPk, recipientDhPk)
+        val completeMessage = Protocol.AkeMessage.newBuilder()
+            .setDhPk(com.google.protobuf.ByteString.copyFrom(combinedDhPk))
+            .build()
+        
+        android.util.Log.d(TAG, "AKE completed as caller, shared key: ${Utilities.encodeToHex(sharedKey).take(16)}...")
+        return completeMessage
     }
     
     /**
      * Finalizes AKE on the recipient side.
      * Computes shared key and initializes Double Ratchet session.
      * 
+     * Go equivalent: AkeFinalize(recipient *CallState, callerMsg *ProtocolMessage) error
+     * 
      * @param callState The call state with peer keys already stored from akeResponse
-     * @param callerDhPk The caller's DH public key (from the original AKE request)
-     * @return true if successful
+     * @param completeMessage The AkeComplete message containing both DhPks
+     * @return true if successful, false if verification fails
      */
-    fun akeFinalize(callState: CallState, callerDhPk: ByteArray): Boolean {
+    fun akeFinalize(callState: CallState, completeMessage: Protocol.AkeMessage): Boolean {
         val config = callState.config
-        val peerDrPk = callState.counterpartDrPk
         
-        // Compute shared key from ephemeral DH
+        val combinedDhPk = completeMessage.dhPk.toByteArray()
+        
+        // Validate DhPk length (must be 64 bytes = 2 x 32-byte keys)
+        // Matches Go: if len(dhPk) < 64 { return error }
+        if (combinedDhPk.size < 64) {
+            android.util.Log.e(TAG, "Invalid DhPk length: ${combinedDhPk.size}")
+            return false
+        }
+        
+        // Extract caller's DhPk (first 32 bytes) and recipient's DhPk (last 32 bytes)
+        val callerDhPk = combinedDhPk.copyOfRange(0, 32)
+        val recipientDhPk = combinedDhPk.copyOfRange(32, 64)
+        
+        // Verify recipient's DhPk matches our own
+        // Matches Go: if !bytes.Equal(dhPk[32:], recipient.Ake.DhPk) { return error }
+        if (!recipientDhPk.contentEquals(callState.ake.dhPk)) {
+            android.util.Log.e(TAG, "Recipient DH PK do not match")
+            return false
+        }
+        
+        // Compute DH secret using LibDia
+        // Matches Go: secret, err := dia.DHComputeSecret(recipient.Ake.DhSk, dhPk[:32])
+        val secret = LibDia.dhComputeSecret(callState.ake.dhSk, callerDhPk)
+        
+        // Compute shared key: HashAll(topic, callerProof, recipientProof, callerDhPk, recipientDhPk, secret)
+        // Matches Go: ComputeSharedKey(recipient.Ake.Topic, recipient.Ake.CallerProof, recipient.Ake.RecipientProof, dhPk[:32], recipient.Ake.DhPk, secret)
         val sharedKey = computeSharedKey(
-            callState.ake.dhSk,
+            callState.ake.topic,
+            callState.ake.callerProof,
+            callState.ake.recipientProof,
             callerDhPk,
-            callerDhPk,  // For recipient, caller's key comes first in ordering
-            callState.ake.dhPk
+            callState.ake.dhPk,
+            secret
         )
         
-        // Derive DR initialization key  
-        val drKey = deriveKey(sharedKey, AKE_DR_KEY_INFO.toByteArray())
-        
-        // Session ID from concatenated ephemeral public keys (same order as caller for consistency)
-        val sessionId = Utilities.hash(
-            Utilities.concatBytes(callerDhPk, callState.ake.dhPk)
-        )
+        callState.setSharedKey(sharedKey)
         
         // Initialize Double Ratchet as recipient
+        // Matches Go: InitDrSessionAsRecipient(recipient.Ake.Topic, recipient.SharedKey, recipient.Config.DrPrivateKey, recipient.Config.DrPublicKey)
         val drSession = DoubleRatchet.initAsRecipient(
-            sessionId = sessionId,
-            sharedKey = drKey,
+            sessionId = callState.ake.topic,
+            sharedKey = sharedKey,
             drPrivateKey = config.drPrivateKey,
             drPublicKey = config.drPublicKey
         )
-        
         callState.drSession = drSession
-        callState.setSharedKey(sharedKey)
         
-        android.util.Log.d(TAG, "AKE finalized as recipient, DR session initialized")
+        android.util.Log.d(TAG, "AKE finalized as recipient, shared key: ${Utilities.encodeToHex(sharedKey).take(16)}...")
         return true
     }
     
     /**
-     * Computes shared key using X25519 DH and HKDF.
+     * Computes shared key using HashAll.
      * 
-     * @param localPrivateKey Our ephemeral private key
-     * @param remotePublicKey Peer's ephemeral public key
-     * @param initiatorPk Initiator's public key (for consistent key derivation)
-     * @param responderPk Responder's public key (for consistent key derivation)
+     * Matches Go: func ComputeSharedKey(tpc, pieA, pieB, A, B, sec []byte) []byte {
+     *     return helpers.HashAll(tpc, pieA, pieB, A, B, sec)
+     * }
+     * 
+     * @param tpc AKE topic
+     * @param pieA Caller's ZK proof
+     * @param pieB Recipient's ZK proof
+     * @param A Caller's DH public key
+     * @param B Recipient's DH public key
+     * @param sec DH shared secret
      * @return 32-byte shared key
      */
     private fun computeSharedKey(
-        localPrivateKey: ByteArray,
-        remotePublicKey: ByteArray,
-        initiatorPk: ByteArray,
-        responderPk: ByteArray
+        tpc: ByteArray,
+        pieA: ByteArray,
+        pieB: ByteArray,
+        A: ByteArray,
+        B: ByteArray,
+        sec: ByteArray
     ): ByteArray {
-        // Perform X25519 DH
-        val privateKeyParams = X25519PrivateKeyParameters(localPrivateKey, 0)
-        val publicKeyParams = X25519PublicKeyParameters(remotePublicKey, 0)
-        
-        val agreement = X25519Agreement()
-        agreement.init(privateKeyParams)
-        
-        val dhSecret = ByteArray(agreement.agreementSize)
-        agreement.calculateAgreement(publicKeyParams, dhSecret, 0)
-        
-        // Create salt from concatenated public keys (for consistent derivation)
-        val salt = Utilities.concatBytes(initiatorPk, responderPk)
-        
-        // Derive final shared key using HKDF
-        return deriveKey(dhSecret, AKE_SHARED_KEY_INFO.toByteArray(), salt)
-    }
-    
-    /**
-     * Derives a key using HKDF-SHA256.
-     */
-    private fun deriveKey(
-        ikm: ByteArray,
-        info: ByteArray,
-        salt: ByteArray = ByteArray(32)
-    ): ByteArray {
-        val hkdf = HKDFBytesGenerator(SHA256Digest())
-        hkdf.init(HKDFParameters(ikm, salt, info))
-        
-        val output = ByteArray(SHARED_KEY_SIZE)
-        hkdf.generateBytes(output, 0, output.size)
-        return output
+        return Utilities.hashAll(tpc, pieA, pieB, A, B, sec)
     }
     
     /**

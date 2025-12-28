@@ -21,6 +21,7 @@ class ProtocolHandler(
     enum class Phase {
         IDLE,
         AKE_INITIATED,
+        AKE_WAITING_COMPLETE,  // Recipient waiting for AkeComplete
         AKE_RESPONDED,
         AKE_COMPLETE,
         RUA_INITIATED,
@@ -51,23 +52,24 @@ class ProtocolHandler(
     
     /**
      * Step 2 (Caller): Process AKE response from recipient and complete AKE.
+     * Returns AkeComplete message to send to recipient.
      */
-    fun callerProcessAkeResponse(response: Protocol.AkeMessage): Boolean {
+    fun callerProcessAkeResponse(response: Protocol.AkeMessage): Protocol.AkeMessage? {
         if (currentPhase != Phase.AKE_INITIATED) {
             lastError = "Invalid phase for processing AKE response: $currentPhase"
             currentPhase = Phase.ERROR
-            return false
+            return null
         }
         
-        val success = Ake.akeComplete(callState, response, callState.dst)
-        if (success) {
+        val completeMessage = Ake.akeComplete(callState, response, callState.dst)
+        if (completeMessage != null) {
             currentPhase = Phase.AKE_COMPLETE
             android.util.Log.d(tag, "Caller: AKE complete")
         } else {
             lastError = "AKE response verification failed"
             currentPhase = Phase.ERROR
         }
-        return success
+        return completeMessage
     }
     
     /**
@@ -113,6 +115,9 @@ class ProtocolHandler(
     /**
      * Step 1 (Recipient): Process incoming AKE request and create response.
      * 
+     * Note: In the new protocol, AKE request doesn't contain DhPk.
+     * The recipient will finalize AKE when receiving AkeComplete message.
+     * 
      * @param request The incoming AKE request
      * @param callerPhoneNumber The caller's phone number from caller ID
      */
@@ -124,24 +129,37 @@ class ProtocolHandler(
         
         val response = Ake.akeResponse(callState, request, callerPhoneNumber)
         if (response != null) {
-            // Store caller's DH public key for finalization
-            val callerDhPk = request.dhPk.toByteArray()
-            
-            // Finalize AKE on recipient side
-            if (Ake.akeFinalize(callState, callerDhPk)) {
-                currentPhase = Phase.AKE_COMPLETE
-                android.util.Log.d(tag, "Recipient: AKE response created and finalized")
-            } else {
-                lastError = "AKE finalization failed"
-                currentPhase = Phase.ERROR
-                return null
-            }
+            currentPhase = Phase.AKE_WAITING_COMPLETE
+            android.util.Log.d(tag, "Recipient: AKE response created, waiting for AkeComplete")
         } else {
             lastError = "AKE request verification failed"
             currentPhase = Phase.ERROR
         }
         
         return response
+    }
+    
+    /**
+     * Step 1.5 (Recipient): Process incoming AKE complete message and finalize AKE.
+     * 
+     * @param completeMessage The AkeComplete message containing both DhPks
+     */
+    fun recipientProcessAkeComplete(completeMessage: Protocol.AkeMessage): Boolean {
+        if (currentPhase != Phase.AKE_WAITING_COMPLETE) {
+            lastError = "Invalid phase for processing AKE complete: $currentPhase"
+            currentPhase = Phase.ERROR
+            return false
+        }
+        
+        val success = Ake.akeFinalize(callState, completeMessage)
+        if (success) {
+            currentPhase = Phase.AKE_COMPLETE
+            android.util.Log.d(tag, "Recipient: AKE finalized")
+        } else {
+            lastError = "AKE finalization failed"
+            currentPhase = Phase.ERROR
+        }
+        return success
     }
     
     /**

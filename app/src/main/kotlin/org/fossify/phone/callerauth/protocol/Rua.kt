@@ -296,14 +296,15 @@ object Rua {
             return null
         }
         
-        // Per Go: sharedKey = HashAll(ddA, rtuB, secret, caller.DhPk, recipient.DhPk)
+        // Per Go: sharedKey = HashAll(ddA, reply.DhPk, rtuB, caller.Sigma, Sigma, secret)
         val rtuB = incomingMessage.rtu.toByteArray()
         val newSharedKey = Utilities.hashAll(
             ddA,
-            rtuB,
-            secret,
-            incomingMessage.dhPk.toByteArray(),
-            callState.rua.dhPk
+            callState.rua.dhPk,           // reply.DhPk (recipient's DH public key)
+            rtuB,                          // caller's RTU serialized
+            incomingMessage.sigma.toByteArray(),  // caller's sigma
+            sigma,                         // recipient's sigma (we just computed)
+            secret                         // DH shared secret
         )
         callState.setSharedKey(newSharedKey)
         
@@ -385,14 +386,15 @@ object Rua {
             return false
         }
         
-        // Per Go: Use caller's RTU (from original request) for shared key
-        val rtuA = originalReq.rtu.toByteArray()
+        // Per Go: sharedKey = HashAll(ddA, recipient.DhPk, rtuB, caller.Sigma, recipient.Sigma, secret)
+        val rtuB = originalReq.rtu.toByteArray()  // caller's RTU serialized
         val newSharedKey = Utilities.hashAll(
             ddA,
-            rtuA,
-            secret,
-            callState.rua.dhPk,
-            responseMessage.dhPk.toByteArray()
+            responseMessage.dhPk.toByteArray(),  // recipient's DH public key
+            rtuB,                                // caller's RTU serialized
+            originalReq.sigma.toByteArray(),     // caller's sigma
+            responseMessage.sigma.toByteArray(), // recipient's sigma
+            secret                               // DH shared secret
         )
         callState.setSharedKey(newSharedKey)
         
