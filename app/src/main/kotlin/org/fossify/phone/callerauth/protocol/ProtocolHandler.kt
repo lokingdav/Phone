@@ -41,8 +41,9 @@ class ProtocolHandler(
     
     /**
      * Step 1 (Caller): Initialize and create AKE request.
+     * Returns serialized ProtocolMessage bytes (unencrypted).
      */
-    fun startAsCallerAke(): Protocol.AkeMessage {
+    fun startAsCallerAke(): ByteArray {
         Ake.initAke(callState)
         val message = Ake.akeRequest(callState)
         currentPhase = Phase.AKE_INITIATED
@@ -52,16 +53,16 @@ class ProtocolHandler(
     
     /**
      * Step 2 (Caller): Process AKE response from recipient and complete AKE.
-     * Returns AkeComplete message to send to recipient.
+     * Returns AkeComplete message bytes (PKE encrypted to recipient) to send to recipient.
      */
-    fun callerProcessAkeResponse(response: Protocol.AkeMessage): Protocol.AkeMessage? {
+    fun callerProcessAkeResponse(responseProtocolMsg: Protocol.ProtocolMessage): ByteArray? {
         if (currentPhase != Phase.AKE_INITIATED) {
             lastError = "Invalid phase for processing AKE response: $currentPhase"
             currentPhase = Phase.ERROR
             return null
         }
         
-        val completeMessage = Ake.akeComplete(callState, response, callState.dst)
+        val completeMessage = Ake.akeComplete(callState, responseProtocolMsg, callState.dst)
         if (completeMessage != null) {
             currentPhase = Phase.AKE_COMPLETE
             android.util.Log.d(tag, "Caller: AKE complete")
@@ -118,16 +119,17 @@ class ProtocolHandler(
      * Note: In the new protocol, AKE request doesn't contain DhPk.
      * The recipient will finalize AKE when receiving AkeComplete message.
      * 
-     * @param request The incoming AKE request
+     * @param requestProtocolMsg The incoming ProtocolMessage containing AKE request
      * @param callerPhoneNumber The caller's phone number from caller ID
+     * @return Serialized ProtocolMessage bytes (PKE encrypted to caller), or null if verification fails
      */
     fun recipientProcessAkeRequest(
-        request: Protocol.AkeMessage,
+        requestProtocolMsg: Protocol.ProtocolMessage,
         callerPhoneNumber: String
-    ): Protocol.AkeMessage? {
+    ): ByteArray? {
         Ake.initAke(callState)
         
-        val response = Ake.akeResponse(callState, request, callerPhoneNumber)
+        val response = Ake.akeResponse(callState, requestProtocolMsg, callerPhoneNumber)
         if (response != null) {
             currentPhase = Phase.AKE_WAITING_COMPLETE
             android.util.Log.d(tag, "Recipient: AKE response created, waiting for AkeComplete")
@@ -142,16 +144,16 @@ class ProtocolHandler(
     /**
      * Step 1.5 (Recipient): Process incoming AKE complete message and finalize AKE.
      * 
-     * @param completeMessage The AkeComplete message containing both DhPks
+     * @param completeProtocolMsg The AkeComplete ProtocolMessage (PKE encrypted)
      */
-    fun recipientProcessAkeComplete(completeMessage: Protocol.AkeMessage): Boolean {
+    fun recipientProcessAkeComplete(completeProtocolMsg: Protocol.ProtocolMessage): Boolean {
         if (currentPhase != Phase.AKE_WAITING_COMPLETE) {
             lastError = "Invalid phase for processing AKE complete: $currentPhase"
             currentPhase = Phase.ERROR
             return false
         }
         
-        val success = Ake.akeFinalize(callState, completeMessage)
+        val success = Ake.akeFinalize(callState, completeProtocolMsg)
         if (success) {
             currentPhase = Phase.AKE_COMPLETE
             android.util.Log.d(tag, "Recipient: AKE finalized")

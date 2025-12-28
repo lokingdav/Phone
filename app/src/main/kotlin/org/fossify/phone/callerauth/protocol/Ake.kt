@@ -12,11 +12,16 @@ import org.fossify.phone.callerauth.Utilities
  * The protocol establishes a shared secret between two parties and initializes
  * a Double Ratchet session for subsequent encrypted communication.
  * 
- * Protocol Flow:
- * 1. Caller: initAke() -> akeRequest() -> sends AkeMessage to recipient
- * 2. Recipient: initAke() -> akeResponse() -> sends AkeMessage back to caller  
- * 3. Caller: akeComplete() -> computes shared key, inits DR as caller
- * 4. Recipient: akeFinalize() -> computes shared key, inits DR as recipient
+ * Protocol Flow (matches Go exactly):
+ * 1. Caller: initAke() -> akeRequest() returns ByteArray (unencrypted ProtocolMessage)
+ * 2. Recipient: initAke() -> akeResponse(protocolMsg) returns ByteArray (PKE encrypted to caller)
+ * 3. Caller: akeComplete(protocolMsg) returns ByteArray (PKE encrypted to recipient)
+ * 4. Recipient: akeFinalize(protocolMsg) -> completes AKE
+ * 
+ * Encryption:
+ * - AkeRequest: Payload is NOT encrypted (recipient needs caller's public keys)
+ * - AkeResponse: Payload is PKE encrypted to caller's PkePk
+ * - AkeComplete: Payload is PKE encrypted to recipient's PkePk
  */
 object Ake {
     private const val TAG = "Ake"
@@ -48,11 +53,12 @@ object Ake {
      * 
      * Note: AkeRequest does NOT include DhPk - it only sends ZK proof and public keys.
      * The DhPk is sent later in AkeComplete.
+     * AkeRequest is NOT encrypted (recipient needs to see caller's public keys).
      * 
      * @param callState The call state containing subscriber config and AKE state
-     * @return AkeMessage protobuf to send to recipient
+     * @return Serialized ProtocolMessage bytes to send to recipient
      */
-    fun akeRequest(callState: CallState): Protocol.AkeMessage {
+    fun akeRequest(callState: CallState): ByteArray {
         val config = callState.config
         
         // Compute challenge: HashAll(topic)
@@ -76,8 +82,18 @@ object Ake {
             .setProof(com.google.protobuf.ByteString.copyFrom(proof))
             .build()
         
+        // Send on AKE topic (NOT encrypted - recipient needs to see caller's public keys)
+        // Matches Go: CreateAkeMessage(caller.SenderId, caller.GetAkeTopic(), TypeAkeRequest, akeMsg, nil)
+        val msg = ProtocolMessages.createAkeMessage(
+            senderId = callState.senderId,
+            topic = callState.getAkeTopic(),
+            msgType = Protocol.MessageType.AKE_REQUEST,
+            payload = akeMessage,
+            recipientPkePk = null  // NOT encrypted
+        )
+        
         android.util.Log.d(TAG, "Created AKE request for ${config.myPhone}")
-        return akeMessage
+        return msg
     }
     
     /**
@@ -86,16 +102,25 @@ object Ake {
      * Go equivalent: AkeResponse(recipient *CallState, callerMsg *ProtocolMessage) ([]byte, error)
      * 
      * @param callState The call state containing subscriber config and AKE state
-     * @param incomingMessage The received AKE request from caller
+     * @param incomingProtocolMsg The received ProtocolMessage from caller
      * @param callerPhoneNumber The caller's phone number (for ZK proof verification)
-     * @return AkeMessage protobuf to send back to caller, or null if verification fails
+     * @return Serialized ProtocolMessage bytes (PKE encrypted to caller), or null if verification fails
      */
     fun akeResponse(
         callState: CallState,
-        incomingMessage: Protocol.AkeMessage,
+        incomingProtocolMsg: Protocol.ProtocolMessage,
         callerPhoneNumber: String
-    ): Protocol.AkeMessage? {
+    ): ByteArray? {
         val config = callState.config
+        
+        // Decode the AKE message (AkeRequest is NOT encrypted)
+        // Matches Go: DecodeAkePayload(callerMsg, nil)
+        val caller = try {
+            ProtocolMessages.decodeAkePayload(incomingProtocolMsg, null)
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "Failed to decode AKE request: ${e.message}")
+            return null
+        }
         
         // Compute challenge0: HashAll(topic)
         // Matches Go: challenge0 := helpers.HashAll(recipient.Ake.Topic)
@@ -104,7 +129,7 @@ object Ake {
         // Verify the incoming proof
         // Matches Go: VerifyZKProof(caller, recipient.Src, challenge0, recipient.Config.RaPublicKey)
         if (!ZkProofs.verifyProofFromMessage(
-            incomingMessage,
+            caller,
             challenge0,
             callerPhoneNumber,
             config.raPublicKey
@@ -115,7 +140,7 @@ object Ake {
         
         // Compute challenge1 for our proof: HashAll(callerProof, recipientDhPk, challenge0)
         // Matches Go: challenge1 := helpers.HashAll(caller.GetProof(), recipient.Ake.DhPk, challenge0)
-        val callerProof = incomingMessage.proof.toByteArray()
+        val callerProof = caller.proof.toByteArray()
         val challenge1 = Utilities.hashAll(callerProof, callState.ake.dhPk, challenge0)
         
         // Create our ZK proof with challenge1
@@ -125,9 +150,9 @@ object Ake {
         // Matches Go: recipient.Ake.CallerProof, recipient.Ake.RecipientProof, recipient.Counterpart*
         callState.ake.callerProof = callerProof
         callState.ake.recipientProof = proof
-        callState.counterpartAmfPk = incomingMessage.amfPk.toByteArray()
-        callState.counterpartPkePk = incomingMessage.pkePk.toByteArray()
-        callState.counterpartDrPk = incomingMessage.drPk.toByteArray()
+        callState.counterpartAmfPk = caller.amfPk.toByteArray()
+        callState.counterpartPkePk = caller.pkePk.toByteArray()
+        callState.counterpartDrPk = caller.drPk.toByteArray()
         
         // Build response message - includes DhPk
         // Matches Go: AkeMessage{DhPk, AmfPk, PkePk, DrPk, Expiration, Proof}
@@ -140,8 +165,18 @@ object Ake {
             .setProof(com.google.protobuf.ByteString.copyFrom(proof))
             .build()
         
+        // Respond on AKE topic (payload encrypted with caller's PKE public key)
+        // Matches Go: CreateAkeMessage(recipient.SenderId, recipient.GetAkeTopic(), TypeAkeResponse, akeMsg, caller.GetPkePk())
+        val msg = ProtocolMessages.createAkeMessage(
+            senderId = callState.senderId,
+            topic = callState.getAkeTopic(),
+            msgType = Protocol.MessageType.AKE_RESPONSE,
+            payload = responseMessage,
+            recipientPkePk = caller.pkePk.toByteArray()  // Encrypt to caller's PKE public key
+        )
+        
         android.util.Log.d(TAG, "Created AKE response for $callerPhoneNumber")
-        return responseMessage
+        return msg
     }
     
     /**
@@ -151,19 +186,28 @@ object Ake {
      * Go equivalent: AkeComplete(caller *CallState, recipientMsg *ProtocolMessage) ([]byte, error)
      * 
      * @param callState The call state
-     * @param responseMessage The AKE response from recipient
+     * @param responseProtocolMsg The AKE response ProtocolMessage from recipient (PKE encrypted)
      * @param recipientPhoneNumber The recipient's phone number
-     * @return AkeMessage with both DhPks to send to recipient, or null if verification fails
+     * @return Serialized ProtocolMessage bytes (PKE encrypted to recipient), or null if verification fails
      */
     fun akeComplete(
         callState: CallState,
-        responseMessage: Protocol.AkeMessage,
+        responseProtocolMsg: Protocol.ProtocolMessage,
         recipientPhoneNumber: String
-    ): Protocol.AkeMessage? {
+    ): ByteArray? {
         val config = callState.config
         
-        val recipientDhPk = responseMessage.dhPk.toByteArray()
-        val recipientProof = responseMessage.proof.toByteArray()
+        // Decode the AKE message (decrypt with caller's PKE private key)
+        // Matches Go: DecodeAkePayload(recipientMsg, caller.Config.PkePrivateKey)
+        val recipient = try {
+            ProtocolMessages.decodeAkePayload(responseProtocolMsg, config.pkePrivateKey)
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "Failed to decode AKE response: ${e.message}")
+            return null
+        }
+        
+        val recipientDhPk = recipient.dhPk.toByteArray()
+        val recipientProof = recipient.proof.toByteArray()
         
         if (recipientDhPk.isEmpty() || recipientProof.isEmpty()) {
             android.util.Log.e(TAG, "Missing DhPk or Proof in AkeResponse")
@@ -181,7 +225,7 @@ object Ake {
         // Verify the response proof
         // Matches Go: VerifyZKProof(recipient, caller.Dst, challenge, caller.Config.RaPublicKey)
         if (!ZkProofs.verifyProofFromMessage(
-            responseMessage,
+            recipient,
             challenge,
             recipientPhoneNumber,
             config.raPublicKey
@@ -191,9 +235,9 @@ object Ake {
         }
         
         // Store peer's keys
-        callState.counterpartAmfPk = responseMessage.amfPk.toByteArray()
-        callState.counterpartPkePk = responseMessage.pkePk.toByteArray()
-        callState.counterpartDrPk = responseMessage.drPk.toByteArray()
+        callState.counterpartAmfPk = recipient.amfPk.toByteArray()
+        callState.counterpartPkePk = recipient.pkePk.toByteArray()
+        callState.counterpartDrPk = recipient.drPk.toByteArray()
         
         // Compute DH secret using LibDia
         // Matches Go: secret, err := dia.DHComputeSecret(caller.Ake.DhSk, recipientDhPk)
@@ -228,8 +272,18 @@ object Ake {
             .setDhPk(com.google.protobuf.ByteString.copyFrom(combinedDhPk))
             .build()
         
+        // Send on AKE topic (payload encrypted with recipient's PKE public key)
+        // Matches Go: CreateAkeMessage(caller.SenderId, caller.GetAkeTopic(), TypeAkeComplete, akeMsg, recipient.GetPkePk())
+        val msg = ProtocolMessages.createAkeMessage(
+            senderId = callState.senderId,
+            topic = callState.getAkeTopic(),
+            msgType = Protocol.MessageType.AKE_COMPLETE,
+            payload = completeMessage,
+            recipientPkePk = recipient.pkePk.toByteArray()  // Encrypt to recipient's PKE public key
+        )
+        
         android.util.Log.d(TAG, "AKE completed as caller, shared key: ${Utilities.encodeToHex(sharedKey).take(16)}...")
-        return completeMessage
+        return msg
     }
     
     /**
@@ -239,13 +293,22 @@ object Ake {
      * Go equivalent: AkeFinalize(recipient *CallState, callerMsg *ProtocolMessage) error
      * 
      * @param callState The call state with peer keys already stored from akeResponse
-     * @param completeMessage The AkeComplete message containing both DhPks
+     * @param completeProtocolMsg The AkeComplete ProtocolMessage (PKE encrypted)
      * @return true if successful, false if verification fails
      */
-    fun akeFinalize(callState: CallState, completeMessage: Protocol.AkeMessage): Boolean {
+    fun akeFinalize(callState: CallState, completeProtocolMsg: Protocol.ProtocolMessage): Boolean {
         val config = callState.config
         
-        val combinedDhPk = completeMessage.dhPk.toByteArray()
+        // Decode the AKE message (decrypt with recipient's PKE private key)
+        // Matches Go: DecodeAkePayload(callerMsg, recipient.Config.PkePrivateKey)
+        val caller = try {
+            ProtocolMessages.decodeAkePayload(completeProtocolMsg, config.pkePrivateKey)
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "Failed to decode AKE complete: ${e.message}")
+            return false
+        }
+        
+        val combinedDhPk = caller.dhPk.toByteArray()
         
         // Validate DhPk length (must be 64 bytes = 2 x 32-byte keys)
         // Matches Go: if len(dhPk) < 64 { return error }
