@@ -70,16 +70,16 @@ object AuthService {
                 currentCallState = callState
                 
                 // Get OOB channel parameters
-                val topic = callState.currentTopic()
-                val ticket = callState.ticket()
-                val senderID = callState.senderID()
+                val topic = callState.currentTopic
+                val ticket = callState.ticket
+                val senderID = callState.senderId
                 
                 Log.d(TAG, "Call state created - topic: $topic, senderID: $senderID")
                 
                 // Start OOB channel
                 val oob = OobController(
-                    relayHost = BuildConfig.RELAY_HOST,
-                    relayPort = BuildConfig.RELAY_PORT,
+                    relayHost = BuildConfig.RS_HOST,
+                    relayPort = BuildConfig.RS_PORT,
                     initialTopic = topic,
                     ticket = ticket,
                     senderID = senderID,
@@ -87,7 +87,7 @@ object AuthService {
                     useTls = false // TODO: Use TLS in production
                 )
                 
-                oob.start { payload -> handleOobMessage(payload) }
+                oob.start { payload: ByteArray -> handleOobMessage(payload) }
                 oob.startHeartbeat()
                 oobController = oob
                 
@@ -131,16 +131,16 @@ object AuthService {
                 currentCallState = callState
                 
                 // Get OOB channel parameters
-                val topic = callState.currentTopic()
-                val ticket = callState.ticket()
-                val senderID = callState.senderID()
+                val topic = callState.currentTopic
+                val ticket = callState.ticket
+                val senderID = callState.senderId
                 
                 Log.d(TAG, "Call state created - topic: $topic, senderID: $senderID")
                 
                 // Start OOB channel
                 val oob = OobController(
-                    relayHost = BuildConfig.RELAY_HOST,
-                    relayPort = BuildConfig.RELAY_PORT,
+                    relayHost = BuildConfig.RS_HOST,
+                    relayPort = BuildConfig.RS_PORT,
                     initialTopic = topic,
                     ticket = ticket,
                     senderID = senderID,
@@ -148,7 +148,7 @@ object AuthService {
                     useTls = false // TODO: Use TLS in production
                 )
                 
-                oob.start { payload -> handleOobMessage(payload) }
+                oob.start { payload: ByteArray -> handleOobMessage(payload) }
                 oob.startHeartbeat()
                 oobController = oob
                 
