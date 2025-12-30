@@ -19,7 +19,7 @@ object AuthService {
     @Volatile private var oob: OobController? = null
 
     /**
-     * TODO: Migrate to LibDia v2 enrollment
+     * Enrolls a new subscriber using LibDia v2 enrollment protocol.
      */
     fun enrollNewNumber(
         phoneNumber: String,
@@ -27,8 +27,16 @@ object AuthService {
         logoUrl: String,
         scope: CoroutineScope
     ) {
-        Log.d(TAG, "Enrollment not yet migrated to LibDia v2")
-        // TODO: Implement using io.github.lokingdav.libdia.Enrollment
+        scope.launch {
+            try {
+                Log.d(TAG, "▶ Starting enrollment for $phoneNumber")
+                ManageEnrollment.enroll(phoneNumber, displayName, logoUrl)
+                Log.d(TAG, "✅ Enrollment completed successfully")
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Enrollment failed for $phoneNumber", e)
+                // TODO: Notify user of failure via callback or event
+            }
+        }
     }
 
     /**
