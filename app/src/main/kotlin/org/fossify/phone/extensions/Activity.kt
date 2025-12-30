@@ -17,21 +17,61 @@ import org.fossify.phone.activities.DialerActivity
 import org.fossify.phone.activities.SimpleActivity
 import org.fossify.phone.dialogs.SelectSIMDialog
 import org.fossify.phone.callerauth.AuthService
+import org.fossify.phone.App
+import android.util.Log
 
 fun SimpleActivity.startCallIntent(recipient: String) {
-    // TODO: Migrate to LibDia v2 - implement outgoing call authentication
-    // AuthService.startOutgoingCall(recipient)
-
-    if (isDefaultDialer()) {
-        getHandleToUse(null, recipient) { handle ->
-            launchCallIntent(recipient, handle)
-        }
+    Log.d("CallAuth", "startCallIntent called for: $recipient")
+    
+    // If enrolled, start authentication protocol before placing call
+    if (App.diaConfig != null) {
+        Log.d("CallAuth", "User is enrolled, starting auth protocol")
+        
+        // Capture activity reference for callback
+        val activity = this
+        
+        AuthService.startOutgoingCall(
+            recipient = recipient,
+            onReadyToCall = {
+                Log.d("CallAuth", "onReadyToCall callback - placing call now")
+                // Authentication initialized, now place the actual call
+                activity.runOnUiThread {
+                    try {
+                        if (activity.isDefaultDialer()) {
+                            activity.getHandleToUse(null, recipient) { handle ->
+                                activity.launchCallIntent(recipient, handle)
+                            }
+                        } else {
+                            activity.launchCallIntent(recipient, null)
+                        }
+                    } catch (e: Exception) {
+                        Log.e("CallAuth", "Error placing call: ${e.message}", e)
+                    }
+                }
+            },
+            onProtocolComplete = { success, remoteParty ->
+                if (success && remoteParty != null) {
+                    Log.d("CallAuth", "Verified caller: ${remoteParty.name}")
+                } else {
+                    Log.w("CallAuth", "Authentication failed or not verified")
+                }
+            }
+        )
     } else {
-        launchCallIntent(recipient, null)
+        Log.d("CallAuth", "User not enrolled, placing call directly")
+        // Not enrolled - place call directly without authentication
+        if (isDefaultDialer()) {
+            getHandleToUse(null, recipient) { handle ->
+                launchCallIntent(recipient, handle)
+            }
+        } else {
+            launchCallIntent(recipient, null)
+        }
     }
 }
 
 fun SimpleActivity.startCallWithConfirmationCheck(recipient: String, name: String) {
+    Log.d("CallAuth", "startCallWithConfirmationCheck called for: $recipient")
     if (config.showCallConfirmation) {
         CallConfirmationDialog(this, name) {
             startCallIntent(recipient)

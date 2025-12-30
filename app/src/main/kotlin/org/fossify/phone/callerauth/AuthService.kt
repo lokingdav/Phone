@@ -2,18 +2,36 @@ package org.fossify.phone.callerauth
 
 import android.telecom.Call
 import android.util.Log
-import io.github.lokingdav.libdia.CallState
-import io.github.lokingdav.libdia.DiaMessage
+import io.github.lokingdav.libdia.*
 import kotlinx.coroutines.*
 import org.fossify.phone.App
 import org.fossify.phone.BuildConfig
 
 /**
  * Authentication service using LibDia v2 API.
- * Manages call authentication lifecycle and OOB channel.
+ * Implements AKE (Authenticated Key Exchange) and RUA (Right-to-Use Authentication) protocols.
+ * 
+ * Flow:
+ * CALLER (Alice):
+ *   1. akeInit() + subscribe to AKE topic
+ *   2. Send AKE_REQUEST
+ *   3. Place actual call (triggers Bob)
+ *   4. Receive AKE_RESPONSE → akeComplete() → send AKE_COMPLETE
+ *   5. Transition to RUA, subscribe to RUA topic with RUA_REQUEST
+ *   6. Receive RUA_RESPONSE → ruaFinalize() → verified identity
+ * 
+ * RECIPIENT (Bob):
+ *   1. Receive call signal (don't ring!)
+ *   2. akeInit() + subscribe to AKE topic (gets AKE_REQUEST via replay)
+ *   3. Receive AKE_REQUEST → akeResponse() → send AKE_RESPONSE
+ *   4. Receive AKE_COMPLETE → akeFinalize()
+ *   5. Transition to RUA, swap to RUA topic
+ *   6. ruaInit() + receive RUA_REQUEST → ruaResponse() → send RUA_RESPONSE
+ *   7. Ring phone
  */
 object AuthService {
     private const val TAG = "CallAuth"
+    private const val PROTOCOL_TIMEOUT_MS = 15_000L
 
     // Service-wide background scope for network I/O
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -21,11 +39,14 @@ object AuthService {
     // Current call state and OOB controller (one active call at a time)
     @Volatile private var currentCallState: CallState? = null
     @Volatile private var oobController: OobController? = null
-    @Volatile private var onDemandAuthCallback: ((Boolean, String?) -> Unit)? = null
+    
+    // Callbacks for protocol completion
+    @Volatile private var onReadyToCallCallback: (() -> Unit)? = null
+    @Volatile private var protocolCompleteCallback: ((Boolean, RemoteParty?) -> Unit)? = null
+    @Volatile private var timeoutJob: Job? = null
 
     /**
      * Enrolls a new subscriber using LibDia v2 enrollment protocol.
-     * Uses serviceScope to survive UI lifecycle changes.
      */
     fun enrollNewNumber(
         phoneNumber: String,
@@ -40,8 +61,7 @@ object AuthService {
                 Log.d(TAG, "✅ Enrollment completed successfully")
                 onComplete?.invoke(true, null)
             } catch (e: CancellationException) {
-                Log.d(TAG, "Enrollment coroutine cancelled for $phoneNumber")
-                throw e // Re-throw to propagate cancellation
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "❌ Enrollment failed for $phoneNumber", e)
                 onComplete?.invoke(false, e.message ?: "Unknown error")
@@ -50,18 +70,33 @@ object AuthService {
     }
 
     /**
-     * Starts authentication for an outgoing call.
-     * Creates CallState, establishes OOB channel, and begins heartbeat.
+     * Starts authentication for an outgoing call (Caller/Alice flow).
+     * 
+     * 1. Initializes AKE and subscribes to AKE topic
+     * 2. Sends AKE_REQUEST
+     * 3. Calls onReadyToCall - UI should place actual telephony call now
+     * 4. Waits for AKE_RESPONSE, completes AKE, transitions to RUA
+     * 5. Waits for RUA_RESPONSE, calls onProtocolComplete with verified identity
      */
-    fun startOutgoingCall(recipient: String, onResult: ((Boolean, String?) -> Unit)? = null) {
+    fun startOutgoingCall(
+        recipient: String,
+        onReadyToCall: () -> Unit,
+        onProtocolComplete: (success: Boolean, remoteParty: RemoteParty?) -> Unit
+    ) {
         serviceScope.launch {
             try {
-                Log.d(TAG, "▶ Starting outgoing call auth to $recipient")
+                Log.d(TAG, "▶ Starting outgoing call protocol to $recipient")
+                
+                // Clean up any stale state from previous call
+                if (currentCallState != null || oobController != null) {
+                    Log.w(TAG, "Cleaning up stale state from previous call")
+                    cleanupSync()
+                }
                 
                 val config = App.diaConfig
                 if (config == null) {
                     Log.e(TAG, "No DiaConfig - user not enrolled")
-                    onResult?.invoke(false, "Not enrolled")
+                    withContext(Dispatchers.Main) { onProtocolComplete(false, null) }
                     return@launch
                 }
 
@@ -69,52 +104,85 @@ object AuthService {
                 val callState = CallState.create(config, recipient, outgoing = true)
                 currentCallState = callState
                 
+                // Initialize AKE (generates DH keys, computes AKE topic)
+                callState.akeInit()
+                
                 // Get OOB channel parameters
-                val topic = callState.currentTopic
+                val akeTopic = callState.akeTopic
                 val ticket = callState.ticket
                 val senderID = callState.senderId
                 
-                Log.d(TAG, "Call state created - topic: $topic, senderID: $senderID")
+                Log.d(TAG, "AKE initialized - topic: $akeTopic, senderID: $senderID")
                 
-                // Start OOB channel
+                // Store callbacks
+                onReadyToCallCallback = onReadyToCall
+                protocolCompleteCallback = onProtocolComplete
+                
+                // Start OOB channel on AKE topic
                 val oob = OobController(
                     relayHost = BuildConfig.RS_HOST,
                     relayPort = BuildConfig.RS_PORT,
-                    initialTopic = topic,
+                    initialTopic = akeTopic,
                     ticket = ticket,
                     senderID = senderID,
                     scope = serviceScope,
-                    useTls = false // TODO: Use TLS in production
+                    useTls = false
                 )
                 
                 oob.start { payload: ByteArray -> handleOobMessage(payload) }
-                oob.startHeartbeat()
+                // Note: Heartbeat will be started after protocol completes
                 oobController = oob
                 
-                Log.d(TAG, "✅ Outgoing call auth started")
-                onResult?.invoke(true, null)
+                // Send AKE request
+                val akeRequest = callState.akeRequest()
+                oob.send(akeRequest)
+                Log.d(TAG, "Sent AKE_REQUEST (${akeRequest.size} bytes)")
+                
+                // Signal that call can now be placed
+                withContext(Dispatchers.Main) {
+                    onReadyToCallCallback?.invoke()
+                    onReadyToCallCallback = null
+                }
+                Log.d(TAG, "Call can now be placed, waiting for AKE_RESPONSE...")
+                
+                // Set timeout for protocol completion
+                startProtocolTimeout()
                 
             } catch (e: Exception) {
-                Log.e(TAG, "❌ Failed to start outgoing call auth", e)
+                Log.e(TAG, "❌ Failed to start outgoing call protocol", e)
                 cleanup()
-                onResult?.invoke(false, e.message)
+                onProtocolComplete(false, null)
             }
         }
     }
 
     /**
-     * Handles an incoming call.
-     * Creates CallState, establishes OOB channel, and begins heartbeat.
+     * Handles an incoming call (Recipient/Bob flow).
+     * 
+     * 1. Initializes AKE and subscribes to AKE topic (gets AKE_REQUEST via replay)
+     * 2. Receives AKE_REQUEST → sends AKE_RESPONSE
+     * 3. Receives AKE_COMPLETE → finalizes AKE
+     * 4. Transitions to RUA, receives RUA_REQUEST → sends RUA_RESPONSE
+     * 5. Calls onProtocolComplete - UI should ring phone now
      */
-    fun handleIncomingCall(call: Call, onResult: ((Boolean, String?) -> Unit)? = null) {
+    fun handleIncomingCall(
+        call: Call,
+        onProtocolComplete: (success: Boolean, remoteParty: RemoteParty?) -> Unit
+    ) {
         serviceScope.launch {
             try {
-                Log.d(TAG, "▶ Handling incoming call")
+                Log.d(TAG, "▶ Received call signal, starting protocol (not ringing yet)")
+                
+                // Clean up any stale state from previous call
+                if (currentCallState != null || oobController != null) {
+                    Log.w(TAG, "Cleaning up stale state from previous call")
+                    cleanupSync()
+                }
                 
                 val config = App.diaConfig
                 if (config == null) {
                     Log.e(TAG, "No DiaConfig - user not enrolled")
-                    onResult?.invoke(false, "Not enrolled")
+                    withContext(Dispatchers.Main) { onProtocolComplete(false, null) }
                     return@launch
                 }
 
@@ -122,133 +190,109 @@ object AuthService {
                 val callerNumber = call.details?.handle?.schemeSpecificPart ?: ""
                 if (callerNumber.isEmpty()) {
                     Log.w(TAG, "No caller number available")
-                    onResult?.invoke(false, "No caller number")
+                    withContext(Dispatchers.Main) { onProtocolComplete(false, null) }
                     return@launch
                 }
+                
+                Log.d(TAG, "Caller: $callerNumber")
                 
                 // Create call state for incoming call
                 val callState = CallState.create(config, callerNumber, outgoing = false)
                 currentCallState = callState
                 
+                // Initialize AKE (generates DH keys, computes AKE topic)
+                callState.akeInit()
+                
                 // Get OOB channel parameters
-                val topic = callState.currentTopic
+                val akeTopic = callState.akeTopic
                 val ticket = callState.ticket
                 val senderID = callState.senderId
                 
-                Log.d(TAG, "Call state created - topic: $topic, senderID: $senderID")
+                Log.d(TAG, "AKE initialized - topic: $akeTopic, senderID: $senderID")
                 
-                // Start OOB channel
+                // Store callback
+                protocolCompleteCallback = onProtocolComplete
+                
+                // Start OOB channel on AKE topic (will receive AKE_REQUEST via replay)
                 val oob = OobController(
                     relayHost = BuildConfig.RS_HOST,
                     relayPort = BuildConfig.RS_PORT,
-                    initialTopic = topic,
+                    initialTopic = akeTopic,
                     ticket = ticket,
                     senderID = senderID,
                     scope = serviceScope,
-                    useTls = false // TODO: Use TLS in production
+                    useTls = false
                 )
                 
                 oob.start { payload: ByteArray -> handleOobMessage(payload) }
-                oob.startHeartbeat()
+                // Note: Heartbeat will be started after protocol completes
                 oobController = oob
                 
-                Log.d(TAG, "✅ Incoming call auth started")
-                onResult?.invoke(true, null)
+                Log.d(TAG, "Subscribed to AKE topic, waiting for AKE_REQUEST...")
+                
+                // Set timeout for protocol completion
+                startProtocolTimeout()
                 
             } catch (e: Exception) {
-                Log.e(TAG, "❌ Failed to handle incoming call", e)
+                Log.e(TAG, "❌ Failed to handle incoming call protocol", e)
                 cleanup()
-                onResult?.invoke(false, e.message)
+                onProtocolComplete(false, null)
             }
         }
     }
 
     /**
-     * Requests on-demand authentication during an active call.
-     * Sends auth request message through OOB channel and waits for response.
-     */
-    fun requestOnDemandAuthentication(onResult: (Boolean, String?) -> Unit) {
-        serviceScope.launch {
-            try {
-                Log.d(TAG, "▶ Requesting on-demand authentication")
-                
-                val callState = currentCallState
-                val oob = oobController
-                
-                if (callState == null || oob == null) {
-                    Log.e(TAG, "No active call for on-demand auth")
-                    onResult(false, "No active call")
-                    return@launch
-                }
-                
-                // Set callback for auth response
-                onDemandAuthCallback = onResult
-                
-                // Create auth request message using CallState
-                val authRequest = callState.createAuthRequest()
-                Log.d(TAG, "Sending auth request (${authRequest.size} bytes)")
-                
-                // Send through OOB channel
-                oob.send(authRequest)
-                
-                // Timeout for response
-                launch {
-                    delay(10_000) // 10 second timeout
-                    if (onDemandAuthCallback != null) {
-                        Log.w(TAG, "Auth request timed out")
-                        onDemandAuthCallback?.invoke(false, "Timeout")
-                        onDemandAuthCallback = null
-                    }
-                }
-                
-            } catch (e: Exception) {
-                Log.e(TAG, "❌ Failed to request on-demand auth", e)
-                onDemandAuthCallback = null
-                onResult(false, e.message ?: "Unknown error")
-            }
-        }
-    }
-
-    /**
-     * Handles incoming OOB messages (auth requests/responses, protocol messages).
+     * Handles incoming OOB messages and routes to appropriate handler.
      */
     private fun handleOobMessage(payload: ByteArray) {
         serviceScope.launch {
             try {
-                Log.d(TAG, "Received OOB message (${payload.size} bytes)")
-                
                 val callState = currentCallState
                 if (callState == null) {
                     Log.w(TAG, "Received OOB message but no active call state")
                     return@launch
                 }
                 
-                // Parse message using LibDia
-                val message = DiaMessage.parse(payload)
+                Log.d(TAG, "Processing OOB message (${payload.size} bytes)")
                 
-                when (message.type) {
-                    io.github.lokingdav.libdia.MSG_AKE_REQUEST -> {
-                        Log.d(TAG, "Received AKE_REQUEST")
-                        handleAuthRequest(callState, message)
+                // Parse message (use() auto-closes the handle)
+                DiaMessage.parse(payload).use { message ->
+                    val msgSenderId = message.senderId
+                    val msgTopic = message.topic
+                    val msgType = message.type
+                    val myTopic = callState.currentTopic
+                    val mySenderId = callState.senderId
+                    
+                    Log.d(TAG, "Message: type=$msgType sender=$msgSenderId topic=$msgTopic")
+                    Log.d(TAG, "My state: sender=$mySenderId topic=$myTopic isCaller=${callState.isCaller}")
+                    
+                    // Self-echo suppression
+                    if (msgSenderId == mySenderId) {
+                        Log.d(TAG, "Ignoring self-authored message")
+                        return@use
                     }
                     
-                    io.github.lokingdav.libdia.MSG_AKE_RESPONSE -> {
-                        Log.d(TAG, "Received AKE_RESPONSE")
-                        handleAuthResponse(callState, message)
+                    // Topic validation - only filter if topics don't match
+                    // Note: During topic transitions, we may receive messages from the old topic
+                    if (msgTopic.isNotEmpty() && myTopic.isNotEmpty() && msgTopic != myTopic) {
+                        Log.d(TAG, "Ignoring message from inactive topic: $msgTopic (current: $myTopic)")
+                        return@use
                     }
                     
-                    io.github.lokingdav.libdia.MSG_RUA_REQUEST -> {
-                        Log.d(TAG, "Received RUA_REQUEST (on-demand auth request)")
-                        handleOnDemandAuthRequest(callState, message)
+                    Log.d(TAG, "✓ Accepted message type=$msgType")
+                    
+                    // Handle BYE message
+                    if (msgType == MSG_BYE) {
+                        Log.d(TAG, "Received BYE message - ending call")
+                        endCallCleanup()
+                        return@use
                     }
                     
-                    io.github.lokingdav.libdia.MSG_RUA_RESPONSE -> {
-                        Log.d(TAG, "Received RUA_RESPONSE (on-demand auth response)")
-                        handleOnDemandAuthResponse(callState, message)
-                    }
-                    
-                    else -> {
-                        Log.w(TAG, "Unknown message type: ${message.type}")
+                    // Route based on role
+                    if (callState.isCaller) {
+                        handleCallerMessage(callState, msgType, payload)
+                    } else if (callState.isRecipient) {
+                        handleRecipientMessage(callState, msgType, payload)
                     }
                 }
                 
@@ -258,64 +302,226 @@ object AuthService {
         }
     }
 
+    // ==================== CALLER (Alice) Message Handlers ====================
+
     /**
-     * Handles incoming auth request (AKE_REQUEST).
+     * Handles messages for the caller (Alice).
      */
-    private suspend fun handleAuthRequest(callState: CallState, message: DiaMessage) {
-        try {
-            val response = callState.respondToAuthRequest(message.data)
-            Log.d(TAG, "Sending AKE_RESPONSE (${response.size} bytes)")
-            oobController?.send(response)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to respond to auth request", e)
+    private suspend fun handleCallerMessage(callState: CallState, msgType: Int, rawData: ByteArray) {
+        when (msgType) {
+            MSG_AKE_RESPONSE -> handleCallerAkeResponse(callState, rawData)
+            MSG_RUA_RESPONSE -> handleCallerRuaResponse(callState, rawData)
+            else -> Log.w(TAG, "Caller received unexpected message type: $msgType")
         }
     }
 
     /**
-     * Handles incoming auth response (AKE_RESPONSE).
+     * Caller handles AKE_RESPONSE from recipient.
      */
-    private suspend fun handleAuthResponse(callState: CallState, message: DiaMessage) {
+    private suspend fun handleCallerAkeResponse(callState: CallState, rawData: ByteArray) {
         try {
-            val verified = callState.verifyAuthResponse(message.data)
-            Log.d(TAG, "Auth response verified: $verified")
-            // TODO: Update UI with verification result
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to verify auth response", e)
-        }
-    }
-
-    /**
-     * Handles incoming on-demand auth request (RUA_REQUEST).
-     */
-    private suspend fun handleOnDemandAuthRequest(callState: CallState, message: DiaMessage) {
-        try {
-            val response = callState.respondToOnDemandAuth(message.data)
-            Log.d(TAG, "Sending RUA_RESPONSE (${response.size} bytes)")
-            oobController?.send(response)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to respond to on-demand auth", e)
-        }
-    }
-
-    /**
-     * Handles incoming on-demand auth response (RUA_RESPONSE).
-     */
-    private suspend fun handleOnDemandAuthResponse(callState: CallState, message: DiaMessage) {
-        try {
-            val verified = callState.verifyOnDemandAuthResponse(message.data)
-            Log.d(TAG, "On-demand auth response verified: $verified")
+            Log.d(TAG, "Processing AKE_RESPONSE...")
             
-            // Invoke callback if waiting for response
-            val callback = onDemandAuthCallback
-            if (callback != null) {
-                callback(verified, if (verified) null else "Verification failed")
-                onDemandAuthCallback = null
-            }
+            // Save old AKE topic
+            val oldAkeTopic = callState.currentTopic
+            
+            // Process response → get AKE_COMPLETE message and shared key
+            val completeMsg = callState.akeComplete(rawData)
+            Log.d(TAG, "✓ AKE Complete! Shared key established")
+            
+            // Derive RUA topic
+            val ruaTopic = callState.ruaDeriveTopic()
+            Log.d(TAG, "RUA topic derived: $ruaTopic")
+            
+            // Create RUA request before transitioning
+            val ruaRequest = callState.ruaRequest()
+            
+            // Transition to RUA state
+            callState.transitionToRua()
+            
+            // Get ticket for topic creation
+            val ticket = callState.ticket
+            
+            // Subscribe to RUA topic with piggyback RUA request
+            oobController?.subscribeToNewTopic(ruaTopic, ruaRequest, ticket)
+            Log.d(TAG, "Subscribed to RUA topic with RUA_REQUEST")
+            
+            // Send AKE_COMPLETE back on old AKE topic
+            oobController?.sendToTopic(oldAkeTopic, completeMsg)
+            Log.d(TAG, "Sent AKE_COMPLETE on old topic")
+            
+            Log.d(TAG, "Waiting for RUA_RESPONSE...")
+            
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to verify on-demand auth response", e)
-            onDemandAuthCallback?.invoke(false, e.message)
-            onDemandAuthCallback = null
+            Log.e(TAG, "Failed to handle AKE_RESPONSE", e)
+            failProtocol()
         }
+    }
+
+    /**
+     * Caller handles RUA_RESPONSE from recipient - protocol complete!
+     */
+    private suspend fun handleCallerRuaResponse(callState: CallState, rawData: ByteArray) {
+        try {
+            Log.d(TAG, "Processing RUA_RESPONSE...")
+            
+            // Finalize RUA
+            callState.ruaFinalize(rawData)
+            
+            // Get verified remote party
+            val remoteParty = callState.remoteParty
+            Log.d(TAG, "✓✓✓ PROTOCOL COMPLETE! Verified: ${remoteParty.name} (${remoteParty.phone})")
+            
+            // Cancel timeout
+            timeoutJob?.cancel()
+            timeoutJob = null
+            
+            // Start heartbeat now that protocol is complete
+            oobController?.startHeartbeat()
+            
+            // Signal protocol complete
+            withContext(Dispatchers.Main) {
+                protocolCompleteCallback?.invoke(true, remoteParty)
+                protocolCompleteCallback = null
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to handle RUA_RESPONSE", e)
+            failProtocol()
+        }
+    }
+
+    // ==================== RECIPIENT (Bob) Message Handlers ====================
+
+    /**
+     * Handles messages for the recipient (Bob).
+     */
+    private suspend fun handleRecipientMessage(callState: CallState, msgType: Int, rawData: ByteArray) {
+        when (msgType) {
+            MSG_AKE_REQUEST -> handleRecipientAkeRequest(callState, rawData)
+            MSG_AKE_COMPLETE -> handleRecipientAkeComplete(callState, rawData)
+            MSG_RUA_REQUEST -> handleRecipientRuaRequest(callState, rawData)
+            else -> Log.w(TAG, "Recipient received unexpected message type: $msgType")
+        }
+    }
+
+    /**
+     * Recipient handles AKE_REQUEST from caller.
+     */
+    private suspend fun handleRecipientAkeRequest(callState: CallState, rawData: ByteArray) {
+        try {
+            Log.d(TAG, "Processing AKE_REQUEST...")
+            
+            // Create and send AKE response
+            val response = callState.akeResponse(rawData)
+            oobController?.send(response)
+            Log.d(TAG, "Sent AKE_RESPONSE (${response.size} bytes)")
+            
+            Log.d(TAG, "Waiting for AKE_COMPLETE...")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to handle AKE_REQUEST", e)
+            failProtocol()
+        }
+    }
+
+    /**
+     * Recipient handles AKE_COMPLETE from caller.
+     */
+    private suspend fun handleRecipientAkeComplete(callState: CallState, rawData: ByteArray) {
+        try {
+            Log.d(TAG, "Processing AKE_COMPLETE...")
+            
+            // Finalize AKE
+            callState.akeFinalize(rawData)
+            Log.d(TAG, "✓ AKE Complete! Shared key established")
+            
+            // Derive RUA topic
+            val ruaTopic = callState.ruaDeriveTopic()
+            Log.d(TAG, "RUA topic derived: $ruaTopic")
+            
+            // Transition to RUA state
+            callState.transitionToRua()
+            
+            // Swap to RUA topic (with replay to get RUA_REQUEST)
+            oobController?.swapToTopic(ruaTopic)
+            Log.d(TAG, "Swapped to RUA topic")
+            
+            // Initialize RUA
+            callState.ruaInit()
+            Log.d(TAG, "RUA initialized, waiting for RUA_REQUEST...")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to handle AKE_COMPLETE", e)
+            failProtocol()
+        }
+    }
+
+    /**
+     * Recipient handles RUA_REQUEST from caller - protocol complete!
+     */
+    private suspend fun handleRecipientRuaRequest(callState: CallState, rawData: ByteArray) {
+        try {
+            Log.d(TAG, "Processing RUA_REQUEST...")
+            
+            // Create and send RUA response
+            val response = callState.ruaResponse(rawData)
+            oobController?.send(response)
+            Log.d(TAG, "Sent RUA_RESPONSE (${response.size} bytes)")
+            
+            // Get verified remote party
+            val remoteParty = callState.remoteParty
+            Log.d(TAG, "✓✓✓ PROTOCOL COMPLETE! Verified: ${remoteParty.name} (${remoteParty.phone})")
+            
+            // Cancel timeout
+            timeoutJob?.cancel()
+            timeoutJob = null
+            
+            // Start heartbeat now that protocol is complete
+            oobController?.startHeartbeat()
+            
+            // Signal protocol complete - phone can ring now!
+            withContext(Dispatchers.Main) {
+                protocolCompleteCallback?.invoke(true, remoteParty)
+                protocolCompleteCallback = null
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to handle RUA_REQUEST", e)
+            failProtocol()
+        }
+    }
+
+    // ==================== Utility Functions ====================
+
+    /**
+     * Starts protocol timeout timer.
+     */
+    private fun startProtocolTimeout() {
+        timeoutJob?.cancel()
+        timeoutJob = serviceScope.launch {
+            delay(PROTOCOL_TIMEOUT_MS)
+            Log.w(TAG, "Protocol timeout after ${PROTOCOL_TIMEOUT_MS}ms")
+            failProtocol()
+        }
+    }
+
+    /**
+     * Called when protocol fails - notify callback and cleanup.
+     */
+    private suspend fun failProtocol() {
+        Log.d(TAG, "failProtocol called - notifying callbacks and cleaning up")
+        timeoutJob?.cancel()
+        timeoutJob = null
+        
+        withContext(Dispatchers.Main) {
+            protocolCompleteCallback?.invoke(false, null)
+            protocolCompleteCallback = null
+            onReadyToCallCallback = null
+        }
+        
+        cleanupSync()  // Use sync cleanup to avoid double cleanup
+        Log.d(TAG, "failProtocol completed")
     }
 
     /**
@@ -328,11 +534,50 @@ object AuthService {
     }
 
     /**
+     * Synchronous cleanup for use within a coroutine.
+     */
+    private suspend fun cleanupSync() {
+        try {
+            Log.d(TAG, "Synchronous cleanup of call auth resources")
+            timeoutJob?.cancel()
+            timeoutJob = null
+            oobController?.stopHeartbeat()
+            oobController?.close()
+            currentCallState?.close()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during sync cleanup", e)
+        } finally {
+            oobController = null
+            currentCallState = null
+            protocolCompleteCallback = null
+            onReadyToCallCallback = null
+        }
+    }
+
+    /**
      * Internal cleanup helper.
      */
     private suspend fun cleanup() {
         try {
             Log.d(TAG, "Cleaning up call auth resources")
+            timeoutJob?.cancel()
+            timeoutJob = null
+            
+            // Send BYE message before closing
+            try {
+                val callState = currentCallState
+                val oob = oobController
+                if (callState != null && oob != null) {
+                    val byeMessage = callState.createByeMessage()
+                    oob.send(byeMessage)
+                    Log.d(TAG, "Sent BYE message")
+                    // Small delay to allow message to be sent
+                    delay(100)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to send BYE message: ${e.message}")
+            }
+            
             oobController?.stopHeartbeat()
             oobController?.close()
             currentCallState?.close()
@@ -341,10 +586,8 @@ object AuthService {
         } finally {
             oobController = null
             currentCallState = null
-            onDemandAuthCallback = null
-        }
-    }
-}
+            protocolCompleteCallback = null
+            onReadyToCallCallback = null
         }
     }
 }

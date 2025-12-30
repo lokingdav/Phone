@@ -844,6 +844,16 @@ class CallActivity : SimpleActivity() {
             updateCallContactInfo(call)
             updateState()
         }
+
+        override fun onCallerVerified(remoteParty: io.github.lokingdav.libdia.RemoteParty) {
+            runOnUiThread {
+                // Update caller info with verified identity
+                binding.callerNameLabel.text = remoteParty.name
+                binding.callerNumber.text = remoteParty.phone
+                // TODO: Show verification badge, load logo from remoteParty.logo
+                android.util.Log.d("CallAuth", "UI updated with verified caller: ${remoteParty.name}")
+            }
+        }
     }
 
     private val updateCallDurationTask = object : Runnable {

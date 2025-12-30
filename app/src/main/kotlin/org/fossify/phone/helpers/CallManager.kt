@@ -7,6 +7,7 @@ import android.telecom.CallAudioState
 import android.telecom.InCallService
 import android.telecom.VideoProfile
 import org.fossify.phone.callerauth.AuthService
+import org.fossify.phone.App
 import org.fossify.phone.extensions.getStateCompat
 import org.fossify.phone.extensions.hasCapability
 import org.fossify.phone.extensions.isConference
@@ -24,8 +25,20 @@ class CallManager {
 
         fun onCallAdded(call: Call) {
             if (call.details.callDirection == Call.Details.DIRECTION_INCOMING) {
-                // TODO: Migrate to LibDia v2 - implement incoming call authentication
-                // AuthService.handleIncomingCall(call)
+                // Start authentication protocol for incoming calls if enrolled
+                if (App.diaConfig != null) {
+                    AuthService.handleIncomingCall(call) { success, remoteParty ->
+                        if (success && remoteParty != null) {
+                            android.util.Log.d("CallAuth", "Verified incoming caller: ${remoteParty.name} (${remoteParty.phone})")
+                            // Notify listeners about verified caller identity
+                            for (listener in listeners) {
+                                listener.onCallerVerified(remoteParty)
+                            }
+                        } else {
+                            android.util.Log.w("CallAuth", "Incoming call authentication failed or caller not verified")
+                        }
+                    }
+                }
             }
 
             this.call = call
@@ -51,6 +64,9 @@ class CallManager {
         fun onCallRemoved(call: Call) {
             calls.remove(call)
             updateState()
+            
+            // Clean up authentication when call ends
+            AuthService.endCallCleanup()
         }
 
         fun onAudioStateChanged(audioState: CallAudioState) {
@@ -220,6 +236,7 @@ interface CallManagerListener {
     fun onStateChanged()
     fun onAudioStateChanged(audioState: AudioRoute)
     fun onPrimaryCallChanged(call: Call)
+    fun onCallerVerified(remoteParty: io.github.lokingdav.libdia.RemoteParty) {}
 }
 
 sealed class PhoneState

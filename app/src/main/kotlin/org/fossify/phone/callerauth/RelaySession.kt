@@ -35,8 +35,7 @@ class RelaySession(
 
     // Lifecycle management
     private val closed = AtomicBoolean(false)
-    private var sessionScope: CoroutineScope? = null
-    private var writerJob: Job? = null
+    private var tunnelJob: Job? = null  // Child job for tunnel loop - cancelling this won't affect parent scope
     
     // Message callback
     private var onMessageCallback: ((ByteArray) -> Unit)? = null
@@ -54,10 +53,10 @@ class RelaySession(
             return
         }
         
-        sessionScope = scope
         onMessageCallback = onMessage
         
-        scope.launch(Dispatchers.IO) {
+        // Launch tunnel as a child job - cancelling tunnelJob won't cancel the parent scope
+        tunnelJob = scope.launch(Dispatchers.IO) {
             tunnelLoop()
         }
     }
@@ -78,12 +77,13 @@ class RelaySession(
         }
 
         val topic = topicMutex.withLock { currentTopic }
+        val ticketBytes = ticket
         val request = Relay.RelayRequest.newBuilder()
             .setSenderId(senderID)
             .setType(Relay.RelayRequest.Type.PUBLISH)
             .setTopic(topic)
             .setPayload(ByteString.copyFrom(payload))
-            .apply { ticket?.let { setTicket(ByteString.copyFrom(it)) } }
+            .apply { ticketBytes?.let { setTicket(ByteString.copyFrom(it)) } }
             .build()
         
         enqueue(request)
@@ -167,8 +167,8 @@ class RelaySession(
         
         Log.d(TAG, "Closing session")
         sendQueue.close()
-        writerJob?.cancel()
-        sessionScope?.cancel()
+        tunnelJob?.cancel()  // Only cancel the tunnel job, not the parent scope
+        tunnelJob = null
     }
 
     // ===== Internal Implementation =====
@@ -176,14 +176,15 @@ class RelaySession(
     /**
      * Main tunnel loop: manages connection lifecycle and auto-reconnect.
      */
-    private suspend fun tunnelLoop() {
+    private suspend fun tunnelLoop() = coroutineScope {
         var backoffIndex = 0
         
-        while (!closed.get() && sessionScope?.isActive == true) {
+        while (!closed.get() && isActive) {
             try {
-                Log.d(TAG, "Opening tunnel...")
+                Log.d(TAG, "Opening tunnel to relay server...")
                 
                 // Create the bidirectional stream
+                val ticketBytes = ticket
                 val requestFlow = flow {
                     // First, send SUBSCRIBE to current topic (with replay)
                     val topic = topicMutex.withLock { currentTopic }
@@ -191,10 +192,11 @@ class RelaySession(
                         .setSenderId(senderID)
                         .setType(Relay.RelayRequest.Type.SUBSCRIBE)
                         .setTopic(topic)
+                        .apply { ticketBytes?.let { setTicket(ByteString.copyFrom(it)) } }
                         .build()
                     
                     emit(subscribeRequest)
-                    Log.d(TAG, "Sent initial SUBSCRIBE to topic: $topic")
+                    Log.d(TAG, "Sent initial SUBSCRIBE to topic: $topic (ticket: ${ticketBytes != null})")
                     
                     // Then pump queued requests
                     sendQueue.receiveAsFlow().collect { emit(it) }
@@ -228,12 +230,12 @@ class RelaySession(
                 when {
                     closed.get() -> {
                         Log.d(TAG, "Session closed, exiting tunnel loop")
-                        return
+                        return@coroutineScope
                     }
                     
                     e is CancellationException -> {
                         Log.d(TAG, "Tunnel loop cancelled")
-                        return
+                        return@coroutineScope
                     }
                     
                     RelayClient.isTransient(e) -> {
@@ -248,7 +250,7 @@ class RelaySession(
             }
             
             // Backoff before reconnecting
-            if (!closed.get()) {
+            if (!closed.get() && isActive) {
                 val delayMs = RETRY_BACKOFF_MS[backoffIndex.coerceAtMost(RETRY_BACKOFF_MS.lastIndex)]
                 if (delayMs > 0) {
                     Log.d(TAG, "Waiting ${delayMs}ms before reconnect...")
