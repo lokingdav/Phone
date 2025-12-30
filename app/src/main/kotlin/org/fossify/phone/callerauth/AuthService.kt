@@ -126,7 +126,8 @@ object AuthService {
                     ticket = ticket,
                     senderID = senderID,
                     scope = serviceScope,
-                    useTls = false
+                    useTls = false,
+                    heartbeatProvider = { callState.createHeartbeatMessage() }
                 )
                 
                 oob.start { payload: ByteArray -> handleOobMessage(payload) }
@@ -221,7 +222,8 @@ object AuthService {
                     ticket = ticket,
                     senderID = senderID,
                     scope = serviceScope,
-                    useTls = false
+                    useTls = false,
+                    heartbeatProvider = { callState.createHeartbeatMessage() }
                 )
                 
                 oob.start { payload: ByteArray -> handleOobMessage(payload) }

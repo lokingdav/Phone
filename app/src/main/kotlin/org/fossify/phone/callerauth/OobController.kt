@@ -15,12 +15,12 @@ class OobController(
     ticket: ByteArray?,
     private val senderID: String,
     private val scope: CoroutineScope,
-    useTls: Boolean = true
+    useTls: Boolean = true,
+    private val heartbeatProvider: (() -> ByteArray)? = null  // Provides heartbeat message from CallState
 ) {
     companion object {
         private const val TAG = "CallAuth-OobController"
         private const val HEARTBEAT_INTERVAL_MS = 30_000L // 30 seconds
-        private val HEARTBEAT_PAYLOAD = byteArrayOf(0x00) // Minimal heartbeat marker
     }
 
     private val client = RelayClient(relayHost, relayPort, useTls)
@@ -38,12 +38,7 @@ class OobController(
         messageCallback = onMessage
         
         session.start(scope) { payload ->
-            // Filter out our own heartbeats
-            if (payload.contentEquals(HEARTBEAT_PAYLOAD)) {
-                Log.v(TAG, "Received heartbeat echo (ignored)")
-            } else {
-                onMessage(payload)
-            }
+            onMessage(payload)
         }
     }
 
@@ -51,6 +46,11 @@ class OobController(
      * Starts sending periodic heartbeat messages to keep the channel alive.
      */
     fun startHeartbeat() {
+        if (heartbeatProvider == null) {
+            Log.w(TAG, "No heartbeat provider configured")
+            return
+        }
+        
         if (heartbeatJob?.isActive == true) {
             Log.w(TAG, "Heartbeat already running")
             return
@@ -60,8 +60,9 @@ class OobController(
         heartbeatJob = scope.launch {
             while (isActive) {
                 try {
-                    session.send(HEARTBEAT_PAYLOAD)
-                    Log.v(TAG, "Sent heartbeat")
+                    val heartbeatMsg = heartbeatProvider.invoke()
+                    session.send(heartbeatMsg)
+                    Log.v(TAG, "Sent heartbeat (${heartbeatMsg.size} bytes)")
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to send heartbeat: ${e.message}")
                 }
