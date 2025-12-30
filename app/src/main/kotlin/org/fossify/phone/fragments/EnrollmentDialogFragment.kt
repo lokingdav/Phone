@@ -8,6 +8,8 @@ import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.DialogFragment
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.fossify.phone.R
 import org.fossify.phone.callerauth.AuthService
 import androidx.lifecycle.lifecycleScope
@@ -83,18 +85,26 @@ class EnrollmentDialogFragment : DialogFragment() {
 
                 // If all fields are valid, proceed and close the dialog
                 if (isValid) {
-                    val message = "Enrolling:\nPhone: $phoneNumber\nName: $displayName\nLogo: $logoUrl"
-                    Toast.makeText(requireContext(), message, Toast.LENGTH_LONG).show()
+                    // Disable button during enrollment to prevent multiple submissions
+                    positiveButton.isEnabled = false
+                    positiveButton.text = "Enrolling..."
 
-                    // Call enrollment service
+                    // Call enrollment service (runs in background scope)
                     AuthService.enrollNewNumber(
                         phoneNumber = phoneNumber,
                         displayName = displayName,
                         logoUrl     = logoUrl,
-                        scope       = lifecycleScope
+                        onComplete = { success, error ->
+                            lifecycleScope.launch(Dispatchers.Main) {
+                                dismiss() // Close dialog first
+                                if (success) {
+                                    Toast.makeText(requireContext(), "Enrollment successful!", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(requireContext(), "Enrollment failed: $error", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }
                     )
-
-                    dismiss() // Manually dismiss the dialog on success
                 }
             }
         }

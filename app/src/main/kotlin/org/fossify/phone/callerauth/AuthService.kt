@@ -20,21 +20,26 @@ object AuthService {
 
     /**
      * Enrolls a new subscriber using LibDia v2 enrollment protocol.
+     * Uses serviceScope to survive UI lifecycle changes.
      */
     fun enrollNewNumber(
         phoneNumber: String,
         displayName: String,
         logoUrl: String,
-        scope: CoroutineScope
+        onComplete: ((success: Boolean, error: String?) -> Unit)? = null
     ) {
-        scope.launch {
+        serviceScope.launch {
             try {
                 Log.d(TAG, "▶ Starting enrollment for $phoneNumber")
                 ManageEnrollment.enroll(phoneNumber, displayName, logoUrl)
                 Log.d(TAG, "✅ Enrollment completed successfully")
+                onComplete?.invoke(true, null)
+            } catch (e: CancellationException) {
+                Log.d(TAG, "Enrollment coroutine cancelled for $phoneNumber")
+                throw e // Re-throw to propagate cancellation
             } catch (e: Exception) {
                 Log.e(TAG, "❌ Enrollment failed for $phoneNumber", e)
-                // TODO: Notify user of failure via callback or event
+                onComplete?.invoke(false, e.message ?: "Unknown error")
             }
         }
     }
