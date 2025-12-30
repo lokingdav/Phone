@@ -22,12 +22,34 @@ class CallManager {
         private var call: Call? = null
         private val calls = mutableListOf<Call>()
         private val listeners = CopyOnWriteArraySet<CallManagerListener>()
+        
+        // Track calls pending authentication - UI should not be shown until auth completes
+        private val callsPendingAuth = mutableSetOf<Call>()
+        
+        fun isCallPendingAuth(call: Call?): Boolean {
+            return call != null && callsPendingAuth.contains(call)
+        }
+        
+        fun onCallAuthCompleted(call: Call, success: Boolean) {
+            callsPendingAuth.remove(call)
+            android.util.Log.d("CallManager", "Call auth completed: success=$success, notifying listeners")
+            // Notify listeners that auth is complete so UI can be shown
+            for (listener in listeners) {
+                listener.onCallAuthCompleted(call, success)
+            }
+        }
 
         fun onCallAdded(call: Call) {
             if (call.details.callDirection == Call.Details.DIRECTION_INCOMING) {
                 // Start authentication protocol for incoming calls if enrolled
                 if (App.diaConfig != null) {
+                    // Mark call as pending auth - UI should not ring until auth completes
+                    callsPendingAuth.add(call)
+                    
                     AuthService.handleIncomingCall(call) { success, remoteParty ->
+                        // Notify that auth is complete so UI can be shown
+                        onCallAuthCompleted(call, success)
+                        
                         if (success && remoteParty != null) {
                             android.util.Log.d("CallAuth", "Verified incoming caller: ${remoteParty.name} (${remoteParty.phone})")
                             // Notify listeners about verified caller identity
@@ -63,6 +85,7 @@ class CallManager {
 
         fun onCallRemoved(call: Call) {
             calls.remove(call)
+            callsPendingAuth.remove(call)
             updateState()
             
             // Clean up authentication when call ends
@@ -237,6 +260,7 @@ interface CallManagerListener {
     fun onAudioStateChanged(audioState: AudioRoute)
     fun onPrimaryCallChanged(call: Call)
     fun onCallerVerified(remoteParty: io.github.lokingdav.libdia.RemoteParty) {}
+    fun onCallAuthCompleted(call: Call, success: Boolean) {}
 }
 
 sealed class PhoneState

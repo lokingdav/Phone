@@ -10,8 +10,10 @@ import org.fossify.phone.extensions.config
 import org.fossify.phone.extensions.isOutgoing
 import org.fossify.phone.extensions.powerManager
 import org.fossify.phone.helpers.CallManager
+import org.fossify.phone.helpers.CallManagerListener
 import org.fossify.phone.helpers.CallNotificationManager
 import org.fossify.phone.helpers.NoCall
+import org.fossify.phone.models.AudioRoute
 import org.fossify.phone.models.Events
 import org.greenrobot.eventbus.EventBus
 
@@ -23,9 +25,22 @@ class CallService : InCallService() {
             super.onStateChanged(call, state)
             if (state == Call.STATE_DISCONNECTED || state == Call.STATE_DISCONNECTING) {
                 callNotificationManager.cancelNotification()
-            } else {
+            } else if (!CallManager.isCallPendingAuth(call)) {
+                // Only show notification if call is not pending authentication
                 callNotificationManager.setupNotification()
             }
+        }
+    }
+    
+    private val callManagerListener = object : CallManagerListener {
+        override fun onStateChanged() {}
+        override fun onAudioStateChanged(audioState: AudioRoute) {}
+        override fun onPrimaryCallChanged(call: Call) {}
+        
+        override fun onCallAuthCompleted(call: Call, success: Boolean) {
+            android.util.Log.d("CallService", "Auth completed for call, showing UI")
+            // Now that authentication is complete, show the call UI
+            showCallUI(call)
         }
     }
 
@@ -33,8 +48,20 @@ class CallService : InCallService() {
         super.onCallAdded(call)
         CallManager.onCallAdded(call)
         CallManager.inCallService = this
+        CallManager.addListener(callManagerListener)
         call.registerCallback(callListener)
 
+        // If incoming call is pending authentication, don't show UI yet
+        // The UI will be shown when onCallAuthCompleted is called
+        if (CallManager.isCallPendingAuth(call)) {
+            android.util.Log.d("CallService", "Incoming call pending auth, deferring UI")
+            return
+        }
+
+        showCallUI(call)
+    }
+    
+    private fun showCallUI(call: Call) {
         val isScreenLocked = (getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager).isDeviceLocked
         if (!powerManager.isInteractive || call.isOutgoing() || isScreenLocked || config.alwaysShowFullscreen) {
             try {
@@ -56,6 +83,7 @@ class CallService : InCallService() {
         CallManager.onCallRemoved(call)
         if (CallManager.getPhoneState() == NoCall) {
             CallManager.inCallService = null
+            CallManager.removeListener(callManagerListener)
             callNotificationManager.cancelNotification()
         } else {
             callNotificationManager.setupNotification()
@@ -76,6 +104,7 @@ class CallService : InCallService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        CallManager.removeListener(callManagerListener)
         callNotificationManager.cancelNotification()
     }
 }
