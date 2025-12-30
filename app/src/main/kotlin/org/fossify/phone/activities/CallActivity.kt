@@ -797,7 +797,9 @@ class CallActivity : SimpleActivity() {
     }
 
     private fun manageOnDemandAuth() {
-        isOnDemandAuthActive = AuthService.requestOnDemandAuthentication()
+        // TODO: Migrate to LibDia v2 - implement on-demand auth
+        // isOnDemandAuthActive = AuthService.requestOnDemandAuthentication()
+        isOnDemandAuthActive = false
         updateOnDemandAuthButtonState()
     }
 

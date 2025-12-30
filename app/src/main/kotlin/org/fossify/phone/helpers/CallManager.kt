@@ -24,7 +24,8 @@ class CallManager {
 
         fun onCallAdded(call: Call) {
             if (call.details.callDirection == Call.Details.DIRECTION_INCOMING) {
-                AuthService.handleIncomingCall(call)
+                // TODO: Migrate to LibDia v2 - implement incoming call authentication
+                // AuthService.handleIncomingCall(call)
             }
 
             this.call = call

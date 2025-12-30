@@ -8,157 +8,36 @@ import io.grpc.ManagedChannelBuilder
 import io.grpc.StatusRuntimeException
 import kotlinx.coroutines.coroutineScope
 import org.fossify.phone.BuildConfig
-import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 /**
- * Handles key generation, request marshaling, signing over the serialized proto,
- * sequential gRPC calls, result gathering and consolidated logging.
+ * Handles enrollment flow - NEEDS MIGRATION TO LIBDIA V2
+ * TODO: Replace with io.github.lokingdav.libdia.Enrollment API
  */
 object ManageEnrollment {
     private const val TAG = "CallAuth-ManageEnrollment"
 
     /**
-     * Builds a signed EnrollmentRequest, performs two RPCs in sequence,
-     * and logs all results together.
+     * TODO: Migrate to LibDia v2 enrollment API
+     * See: io.github.lokingdav.libdia.Enrollment.createRequest() and finalize()
      */
     suspend fun enroll(
         phoneNumber: String,
         displayName: String,
         logoUrl: String
-    ) = coroutineScope {
+    ): Nothing = coroutineScope {
         Log.d(TAG, "▶ enroll() start for $phoneNumber")
-
-        // Generate all keypairs
-        val enrKp = MyKeyPair(Signing.regSigKeygen())
-        val amfKp = AMF.keygen()
-        val (pkeSk, pkePk) = Pke.keygen()
-        val (drSk, drPk) = DoubleRatchet.keygen()
-        val blindedTickets = VOPRF.generateTicket(1)
-
-        // Build the DisplayInformation message
-        val iden = Enrollment.DisplayInformation.newBuilder()
-            .setName(displayName)
-            .setLogoUrl(logoUrl)
-            .build()
-
-        // Build the unsigned EnrollmentRequest
-        val nonce = UUID.randomUUID().toString()
-        val unsigned = Enrollment.EnrollmentRequest.newBuilder()
-            .setTn(phoneNumber)
-            .setIpk(ByteString.copyFrom(enrKp.public.encoded))
-            .setAmfPk(ByteString.copyFrom(amfKp.public))
-            .setPkePk(ByteString.copyFrom(pkePk))
-            .setDrPk(ByteString.copyFrom(drPk))
-            .setIden(iden)
-            .setNonce(nonce)
-            .addAllBlindedTickets(blindedTickets.map {
-                ByteString.copyFrom(it.blinded.encoded)
-            })
-            .build()
-
-        // Sign the exact protobuf bytes
-        val toSign = unsigned.toByteArray()
-        val signatureBytes = Signing.regSigSign(enrKp.private, toSign)
-        val signatureHex = Signing.encodeToHex(signatureBytes)
-        Log.d(TAG, "✍️ Signed proto bytes, signature=$signatureHex")
-
-        // Build the final signed request
-        val req = unsigned.toBuilder()
-            .setSigma(ByteString.copyFrom(signatureBytes))
-            .build()
-        Log.d(TAG, "📨 Built signed EnrollmentRequest")
-
-
-        Log.d(TAG, "⚡ Calling Enrollment Server")
-        val eRes = callServer(req)
-
-        // Finalize
-        try {
-            finalizeEnrollment(
-                phoneNumber,
-                displayName,
-                logoUrl,
-                enrKp,
-                amfKp,
-                PkeKeyPair(pkeSk, pkePk),
-                DrKeyPair(drSk, drPk),
-                eRes,
-                blindedTickets,
-                req.nonce
-            )
-            Log.d(TAG, "Enrollment Complete. Happy Calling")
-        } catch (e: Exception) {
-            val msg = "❌ Enrollment failed: ${e.message}"
-            Log.e(TAG, msg, e)
-        }
-    }
-
-    private fun finalizeEnrollment(
-        phoneNumber: String,
-        displayName: String,
-        logoUrl: String,
-        enrKp: MyKeyPair,
-        amfKp: AMFKeyPair,
-        pkeKp: PkeKeyPair,
-        drKp: DrKeyPair,
-        eRes: Enrollment.EnrollmentResponse,
-        blindedTickets: Array<BlindedTicket>,
-        nonce: String
-    ) {
-        Log.d(TAG, "Constructing User State Object...")
-        val display = DisplayInfo(phoneNumber, displayName, logoUrl)
-        val signature = BbsSignature(
-            eRes.sigma.toByteArray(),
-            BbsPublicKey(eRes.epk.toByteArray())
-        )
-        val tickets = VOPRF.finalizeTickets(blindedTickets, eRes.evaluatedTicketsList.map {
-            Point(it.toByteArray())
-        }.toTypedArray())
-
-        UserState.update(
-            eId=eRes.eid,
-            eExp=eRes.exp,
-            display=display,
-            enrKp=enrKp,
-            amfKp=amfKp,
-            pkeKp=pkeKp,
-            drKp=drKp,
-            signature=signature,
-            tickets=tickets
-        )
-        Log.d(TAG, "\t✅ Success!")
-
-        Log.d(TAG, "Verifying Tickets...")
-        if (!VOPRF.verifyTickets(tickets, eRes.avk.toByteArray())) {
-            throw Exception("tickets failed to verify")
-        }
-        Log.d(TAG, "\t✅ Valid!")
-
-        Log.d(TAG, "Verifying Enrollment Credential...")
-        // Server signs over 2 messages:
-        // message1 = hash(amf_pk || pke_pk || dr_pk || expiration_bytes || telephone_number)
-        // message2 = display_name
-        val expirationBytes = eRes.exp.toByteArray()
-        val message1 = Utilities.hashAll(
-            amfKp.public,
-            pkeKp.public,
-            drKp.public,
-            expirationBytes,
-            phoneNumber.toByteArray(Charsets.UTF_8)
-        )
-        val message2 = displayName.toByteArray(Charsets.UTF_8)
-
-        if (!signature.verify(arrayOf(message1, message2))) {
-            throw Exception("Enrollment signature failed to verify under Registrar")
-        }
-        Log.d(TAG, "\t✅ Valid!")
-
-        Log.d(TAG, "Saving State...")
-        UserState.persist()
-        Log.d(TAG, "\t✅ Saved!")
-
-        Log.d(TAG, "✅ Enrollment complete, eid=${UserState.eId}")
+        
+        // TODO: Replace with LibDia v2:
+        // val (keys, requestData) = Enrollment.createRequest(phoneNumber, displayName, logoUrl, numTickets = 5)
+        // Send requestData to server
+        // val response = callServer(...)
+        // val config = Enrollment.finalize(keys, response, phoneNumber, displayName, logoUrl)
+        // Enrollment.destroyKeys(keys)
+        // Save config for future calls
+        
+        Log.e(TAG, "❌ Enrollment not yet migrated to LibDia v2 - implement using new API")
+        throw NotImplementedError("Migrate to LibDia v2 Enrollment API")
     }
 
     private fun callServer(req: Enrollment.EnrollmentRequest): Enrollment.EnrollmentResponse {

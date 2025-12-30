@@ -86,12 +86,17 @@ class EnrollmentDialogFragment : DialogFragment() {
                     val message = "Enrolling:\nPhone: $phoneNumber\nName: $displayName\nLogo: $logoUrl"
                     Toast.makeText(requireContext(), message, Toast.LENGTH_LONG).show()
 
+                    // TODO: Migrate to LibDia v2 enrollment API
+                    // See: io.github.lokingdav.libdia.Enrollment.createRequest() and finalize()
+                    /*
                     AuthService.enrollNewNumber(
                         phoneNumber = phoneNumber,
                         displayName = displayName,
                         logoUrl     = logoUrl,
                         scope       = lifecycleScope
                     )
+                    */
+                    Toast.makeText(requireContext(), "Enrollment not yet migrated to LibDia v2", Toast.LENGTH_SHORT).show()
 
                     dismiss() // Manually dismiss the dialog on success
                 }

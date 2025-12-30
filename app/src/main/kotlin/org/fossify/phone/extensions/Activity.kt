@@ -19,7 +19,8 @@ import org.fossify.phone.dialogs.SelectSIMDialog
 import org.fossify.phone.callerauth.AuthService
 
 fun SimpleActivity.startCallIntent(recipient: String) {
-    AuthService.startOutgoingCall(recipient)
+    // TODO: Migrate to LibDia v2 - implement outgoing call authentication
+    // AuthService.startOutgoingCall(recipient)
 
     if (isDefaultDialer()) {
         getHandleToUse(null, recipient) { handle ->
