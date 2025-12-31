@@ -17,6 +17,7 @@ import org.fossify.phone.activities.DialerActivity
 import org.fossify.phone.activities.SimpleActivity
 import org.fossify.phone.dialogs.SelectSIMDialog
 import org.fossify.phone.callerauth.AuthService
+import org.fossify.phone.helpers.CallManager
 import org.fossify.phone.App
 import android.util.Log
 
@@ -51,9 +52,12 @@ fun SimpleActivity.startCallIntent(recipient: String) {
             },
             onProtocolComplete = { success, remoteParty ->
                 if (success && remoteParty != null) {
-                    Log.d("CallAuth", "Verified caller: ${remoteParty.name}")
+                    Log.d("CallAuth", "Verified recipient: ${remoteParty.name} (${remoteParty.phone})")
+                    // Notify CallManager so UI can show verified recipient
+                    CallManager.onOutgoingCallVerified(remoteParty)
                 } else {
-                    Log.w("CallAuth", "Authentication failed or not verified")
+                    Log.w("CallAuth", "Outgoing authentication failed or recipient not verified")
+                    CallManager.onOutgoingCallAuthFailed()
                 }
             }
         )

@@ -860,12 +860,16 @@ class CallActivity : SimpleActivity() {
             updateCallContactInfo(call)
             updateState()
             
-            // Show "Verifying..." status for incoming calls if enrolled and pending auth
-            if (call.details?.callDirection == Call.Details.DIRECTION_INCOMING && 
-                App.diaConfig != null && 
-                CallManager.isCallPendingAuth(call)) {
-                runOnUiThread {
-                    showVerifyingStatus()
+            // Show "Verifying..." status for calls if enrolled
+            if (App.diaConfig != null && verifiedRemoteParty == null) {
+                val direction = call.details?.callDirection
+                val isIncoming = direction == Call.Details.DIRECTION_INCOMING
+                val isOutgoing = direction == Call.Details.DIRECTION_OUTGOING
+                
+                if ((isIncoming && CallManager.isCallPendingAuth(call)) || isOutgoing) {
+                    runOnUiThread {
+                        showVerifyingStatus()
+                    }
                 }
             }
         }

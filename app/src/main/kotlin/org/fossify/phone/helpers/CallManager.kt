@@ -43,6 +43,26 @@ class CallManager {
                 listener.onCallAuthCompleted(call, success)
             }
         }
+        
+        /**
+         * Called when outgoing call authentication completes successfully.
+         * Notifies listeners with the verified recipient identity.
+         */
+        fun onOutgoingCallVerified(remoteParty: io.github.lokingdav.libdia.RemoteParty) {
+            android.util.Log.d("CallAuth", "Verified outgoing recipient: ${remoteParty.name} (${remoteParty.phone})")
+            verifiedRemoteParty = remoteParty
+            for (listener in listeners) {
+                listener.onCallerVerified(remoteParty)
+            }
+        }
+        
+        /**
+         * Called when outgoing call authentication fails.
+         */
+        fun onOutgoingCallAuthFailed() {
+            android.util.Log.w("CallAuth", "Outgoing call authentication failed")
+            verifiedRemoteParty = null
+        }
 
         fun onCallAdded(call: Call) {
             if (call.details.callDirection == Call.Details.DIRECTION_INCOMING) {
