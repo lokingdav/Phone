@@ -26,6 +26,11 @@ class CallManager {
         // Track calls pending authentication - UI should not be shown until auth completes
         private val callsPendingAuth = mutableSetOf<Call>()
         
+        // Store verified remote party for late-joining listeners (e.g., CallActivity)
+        private var verifiedRemoteParty: io.github.lokingdav.libdia.RemoteParty? = null
+        
+        fun getVerifiedRemoteParty(): io.github.lokingdav.libdia.RemoteParty? = verifiedRemoteParty
+        
         fun isCallPendingAuth(call: Call?): Boolean {
             return call != null && callsPendingAuth.contains(call)
         }
@@ -52,12 +57,15 @@ class CallManager {
                         
                         if (success && remoteParty != null) {
                             android.util.Log.d("CallAuth", "Verified incoming caller: ${remoteParty.name} (${remoteParty.phone})")
+                            // Store for late-joining listeners (e.g., CallActivity started after auth)
+                            verifiedRemoteParty = remoteParty
                             // Notify listeners about verified caller identity
                             for (listener in listeners) {
                                 listener.onCallerVerified(remoteParty)
                             }
                         } else {
                             android.util.Log.w("CallAuth", "Incoming call authentication failed or caller not verified")
+                            verifiedRemoteParty = null
                         }
                     }
                 }
@@ -86,6 +94,7 @@ class CallManager {
         fun onCallRemoved(call: Call) {
             calls.remove(call)
             callsPendingAuth.remove(call)
+            verifiedRemoteParty = null  // Clear verified party when call ends
             updateState()
             
             // Clean up authentication when call ends

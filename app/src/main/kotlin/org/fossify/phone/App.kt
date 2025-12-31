@@ -15,6 +15,29 @@ class App : FossifyApp() {
          */
         var diaConfig: DiaConfig? = null
             private set
+        
+        /**
+         * Reloads DiaConfig from storage. Call this after enrollment changes.
+         */
+        fun reloadDiaConfig() {
+            val savedEnv = Storage.loadDiaConfig()
+            if (savedEnv != null) {
+                try {
+                    Log.d(TAG, "Reloading DiaConfig from storage...")
+                    diaConfig?.close() // Close old config if it exists
+                    diaConfig = DiaConfig.fromEnv(savedEnv)
+                    Log.d(TAG, "✓ DiaConfig reloaded successfully")
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ Failed to reload DiaConfig from storage", e)
+                    diaConfig = null
+                    Storage.clearEnrollment()
+                }
+            } else {
+                Log.d(TAG, "No saved enrollment data found")
+                diaConfig?.close()
+                diaConfig = null
+            }
+        }
     }
     
     override fun onCreate() {
@@ -23,19 +46,6 @@ class App : FossifyApp() {
         Storage.init(this)
         
         // Load saved DiaConfig if user is enrolled
-        val savedEnv = Storage.loadDiaConfig()
-        if (savedEnv != null) {
-            try {
-                Log.d(TAG, "Loading saved DiaConfig from storage...")
-                diaConfig = DiaConfig.fromEnv(savedEnv)
-                Log.d(TAG, "✓ DiaConfig loaded successfully")
-            } catch (e: Exception) {
-                Log.e(TAG, "❌ Failed to load DiaConfig from storage", e)
-                // Clear corrupted data
-                Storage.clearEnrollment()
-            }
-        } else {
-            Log.d(TAG, "No saved enrollment data found")
-        }
+        reloadDiaConfig()
     }
 }

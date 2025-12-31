@@ -10,6 +10,7 @@ import io.grpc.StatusRuntimeException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.fossify.phone.BuildConfig
+import org.fossify.phone.App
 import java.util.concurrent.TimeUnit
 
 /**
@@ -71,7 +72,11 @@ object ManageEnrollment {
             Storage.saveDiaConfig(envString)
             Log.d(TAG, "✓ Config saved to storage")
             
-            // Step 6: Clean up temporary keys
+            // Step 6: Reload App.diaConfig so it's immediately available
+            App.reloadDiaConfig()
+            Log.d(TAG, "✓ App.diaConfig reloaded")
+            
+            // Step 7: Clean up temporary keys
             DiaEnrollment.destroyKeys(enrollmentRequest.keysHandle)
             Log.d(TAG, "✓ Temporary keys destroyed")
             

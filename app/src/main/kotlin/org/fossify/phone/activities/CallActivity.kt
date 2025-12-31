@@ -31,6 +31,7 @@ import org.fossify.commons.extensions.*
 import org.fossify.commons.helpers.*
 import org.fossify.commons.models.SimpleListItem
 import org.fossify.phone.R
+import org.fossify.phone.App
 import org.fossify.phone.databinding.ActivityCallBinding
 import org.fossify.phone.callerauth.AuthService
 import org.fossify.phone.dialogs.DynamicBottomSheetChooserDialog
@@ -66,6 +67,7 @@ class CallActivity : SimpleActivity() {
     private var dialpadHeight = 0f
 
     private var isOnDemandAuthActive = false
+    private var verifiedRemoteParty: io.github.lokingdav.libdia.RemoteParty? = null
 
     private var audioRouteChooserDialog: DynamicBottomSheetChooserDialog? = null
 
@@ -84,6 +86,14 @@ class CallActivity : SimpleActivity() {
         addLockScreenFlags()
         CallManager.addListener(callCallback)
         updateCallContactInfo(CallManager.getPrimaryCall())
+        
+        // Check if call was already verified before Activity started
+        val existingVerifiedParty = CallManager.getVerifiedRemoteParty()
+        if (existingVerifiedParty != null) {
+            verifiedRemoteParty = existingVerifiedParty
+            updateAuthStatus(true, existingVerifiedParty)
+            android.util.Log.d("CallAuth", "Restored verified caller from CallManager: ${existingVerifiedParty.name}")
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -581,6 +591,12 @@ class CallActivity : SimpleActivity() {
         if (callContact == null) {
             return
         }
+        
+        // Don't overwrite verified identity info
+        if (verifiedRemoteParty != null) {
+            android.util.Log.d("CallAuth", "Skipping updateOtherPersonsInfo - verified remote party exists")
+            return
+        }
 
         binding.apply {
             val (name, _, number, numberLabel) = callContact!!
@@ -843,15 +859,93 @@ class CallActivity : SimpleActivity() {
             callDurationHandler.removeCallbacks(updateCallDurationTask)
             updateCallContactInfo(call)
             updateState()
+            
+            // Show "Verifying..." status for incoming calls if enrolled and pending auth
+            if (call.details?.callDirection == Call.Details.DIRECTION_INCOMING && 
+                App.diaConfig != null && 
+                CallManager.isCallPendingAuth(call)) {
+                runOnUiThread {
+                    showVerifyingStatus()
+                }
+            }
         }
 
         override fun onCallerVerified(remoteParty: io.github.lokingdav.libdia.RemoteParty) {
             runOnUiThread {
-                // Update caller info with verified identity
-                binding.callerNameLabel.text = remoteParty.name
-                binding.callerNumber.text = remoteParty.phone
-                // TODO: Show verification badge, load logo from remoteParty.logo
+                verifiedRemoteParty = remoteParty
+                updateAuthStatus(true, remoteParty)
                 android.util.Log.d("CallAuth", "UI updated with verified caller: ${remoteParty.name}")
+            }
+        }
+        
+        override fun onCallAuthCompleted(call: Call, success: Boolean) {
+            runOnUiThread {
+                // If auth failed (no onCallerVerified was called), show unverified status
+                if (!success && verifiedRemoteParty == null) {
+                    updateAuthStatus(false, null)
+                    android.util.Log.d("CallAuth", "Auth failed, showing unverified status")
+                }
+            }
+        }
+    }
+    
+    private fun showVerifyingStatus() {
+        binding.apply {
+            authStatusLabel.visibility = View.VISIBLE
+            authStatusIcon.setImageResource(R.drawable.ic_verifying_vector)
+            authStatusText.text = getString(R.string.caller_verifying)
+            authStatusText.setTextColor(resources.getColor(R.color.md_blue_700, theme))
+        }
+    }
+    
+    private fun updateAuthStatus(verified: Boolean, remoteParty: io.github.lokingdav.libdia.RemoteParty?) {
+        binding.apply {
+            authStatusLabel.visibility = View.VISIBLE
+            
+            if (verified && remoteParty != null) {
+                android.util.Log.d("CallAuth", "RemoteParty received - name='${remoteParty.name}', phone='${remoteParty.phone}', logo='${remoteParty.logo}', verified=${remoteParty.verified}")
+                
+                // Update caller name and number with verified identity
+                val displayName = remoteParty.name.ifEmpty { "Unknown" }
+                callerNameLabel.text = displayName
+                android.util.Log.d("CallAuth", "Setting callerNameLabel.text to: '$displayName'")
+                
+                val displayPhone = remoteParty.phone.ifEmpty { callContact?.number ?: "" }
+                if (displayPhone.isNotEmpty()) {
+                    callerNumber.text = displayPhone
+                    callerNumber.visibility = View.VISIBLE
+                }
+                
+                // Load logo if available
+                val logoUrl = remoteParty.logo
+                android.util.Log.d("CallAuth", "Logo URL: '$logoUrl'")
+                if (logoUrl.isNotEmpty()) {
+                    if (!isFinishing && !isDestroyed) {
+                        // Reset avatar completely for logo display
+                        callerAvatar.background = null
+                        callerAvatar.setPadding(0)
+                        callerAvatar.clearColorFilter()
+                        
+                        Glide.with(this@CallActivity)
+                            .load(logoUrl)
+                            .apply(RequestOptions.circleCropTransform())
+                            .placeholder(R.drawable.ic_person_vector)
+                            .error(R.drawable.ic_person_vector)
+                            .into(callerAvatar)
+                    }
+                }
+                
+                // Show verified status
+                authStatusIcon.setImageResource(R.drawable.ic_verified_vector)
+                authStatusText.text = getString(R.string.caller_verified)
+                authStatusText.setTextColor(resources.getColor(R.color.md_green_700, theme))
+                
+                android.util.Log.d("CallAuth", "Updated UI complete: name=$displayName, phone=$displayPhone, logo=$logoUrl")
+            } else {
+                // Show unverified status
+                authStatusIcon.setImageResource(R.drawable.ic_unverified_vector)
+                authStatusText.text = getString(R.string.caller_unverified)
+                authStatusText.setTextColor(resources.getColor(R.color.md_amber_700, theme))
             }
         }
     }

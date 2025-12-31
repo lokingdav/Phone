@@ -66,6 +66,9 @@
     <string name="calling_blocked_number">The number you are calling is blocked</string>
     <string name="call_is_being_connected">Your call is being connected…</string>
     <string name="manage_on_demand_auth">Manage on-demand auth</string>
+    <string name="caller_verified">Verified Identity</string>
+    <string name="caller_unverified">Unverified Identity</string>
+    <string name="caller_verifying">Verifying…</string>
 
     <!-- Speed dial -->
     <string name="speed_dial">Speed dial</string>
