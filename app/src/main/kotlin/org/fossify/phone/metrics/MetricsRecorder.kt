@@ -1,6 +1,7 @@
 package org.fossify.phone.metrics
 
 import android.content.Context
+import android.os.SystemClock
 import android.telecom.Call
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
@@ -51,12 +52,14 @@ object MetricsRecorder {
         val peerPhone: String,
         val peerUri: String,
         val dialSentAtUnixMs: Long,
+        val dialSentElapsedMs: Long,
     ) {
         @Volatile var callId: String = ""
         @Volatile var answeredAtUnixMs: Long = 0L
         @Volatile var answeredEmitted: Boolean = false
 
         @Volatile var odaRequestedAtUnixMs: Long = 0L
+        @Volatile var odaRequestedElapsedMs: Long = 0L
     }
 
     private val pendingOutgoingByPeer = ConcurrentHashMap<String, ConcurrentLinkedQueue<AttemptContext>>()
@@ -67,14 +70,16 @@ object MetricsRecorder {
     }
 
     fun markOutgoingDial(peerPhone: String, protocolEnabled: Boolean) {
-        val now = System.currentTimeMillis()
+        val nowUnixMs = System.currentTimeMillis()
+        val nowElapsedMs = SystemClock.elapsedRealtime()
         val attempt = AttemptContext(
             attemptId = UUID.randomUUID().toString(),
             direction = "outgoing",
             protocolEnabled = protocolEnabled,
             peerPhone = peerPhone,
             peerUri = "tel:$peerPhone",
-            dialSentAtUnixMs = now
+            dialSentAtUnixMs = nowUnixMs,
+            dialSentElapsedMs = nowElapsedMs
         )
 
         val key = normalizePhone(peerPhone)
@@ -97,7 +102,8 @@ object MetricsRecorder {
                 protocolEnabled = (App.diaConfig != null && context.config.diaProtocolEnabled),
                 peerPhone = peerPhone,
                 peerUri = peerUri,
-                dialSentAtUnixMs = 0L
+                dialSentAtUnixMs = 0L,
+                dialSentElapsedMs = 0L
             )
 
             attempt.callId = callKey.toString()
@@ -112,7 +118,8 @@ object MetricsRecorder {
             protocolEnabled = (App.diaConfig != null && context.config.diaProtocolEnabled),
             peerPhone = peerPhone,
             peerUri = peerUri,
-            dialSentAtUnixMs = 0L
+            dialSentAtUnixMs = 0L,
+            dialSentElapsedMs = 0L
         )
         attempt.callId = callKey.toString()
         activeByCallKey[callKey] = attempt
@@ -131,15 +138,16 @@ object MetricsRecorder {
             return
         }
 
-        val answeredAt = System.currentTimeMillis()
-        attempt.answeredAtUnixMs = answeredAt
+        val answeredAtUnixMs = System.currentTimeMillis()
+        val answeredElapsedMs = SystemClock.elapsedRealtime()
+        attempt.answeredAtUnixMs = answeredAtUnixMs
         attempt.answeredEmitted = true
 
-        val latency = answeredAt - attempt.dialSentAtUnixMs
+        val latencyMs = if (attempt.dialSentElapsedMs > 0L) answeredElapsedMs - attempt.dialSentElapsedMs else 0L
         appendRecord(
             attempt = attempt,
-            answeredAtUnixMs = answeredAt,
-            latencyMs = latency,
+            answeredAtUnixMs = answeredAtUnixMs,
+            latencyMs = latencyMs,
             outcome = "answered",
             error = ""
         )
@@ -154,28 +162,32 @@ object MetricsRecorder {
         val callKey = System.identityHashCode(call)
         val attempt = activeByCallKey[callKey] ?: return
         attempt.odaRequestedAtUnixMs = System.currentTimeMillis()
+        attempt.odaRequestedElapsedMs = SystemClock.elapsedRealtime()
     }
 
     fun onOdaCompleted(call: Call, outcome: String, error: String = "") {
         val callKey = System.identityHashCode(call)
         val attempt = activeByCallKey[callKey] ?: return
         val reqAt = attempt.odaRequestedAtUnixMs
+        val reqElapsed = attempt.odaRequestedElapsedMs
         if (reqAt <= 0L) {
             return
         }
 
-        val doneAt = System.currentTimeMillis()
-        val odaLatency = doneAt - reqAt
+        val doneAtUnixMs = System.currentTimeMillis()
+        val doneElapsedMs = SystemClock.elapsedRealtime()
+        val odaLatencyMs = if (reqElapsed > 0L) doneElapsedMs - reqElapsed else 0L
         appendRecord(
             attempt = attempt,
             odaReqUnixMs = reqAt,
-            odaDoneUnixMs = doneAt,
-            odaLatencyMs = odaLatency,
+            odaDoneUnixMs = doneAtUnixMs,
+            odaLatencyMs = odaLatencyMs,
             outcome = outcome,
-            error = error,
+            error = error
         )
 
         attempt.odaRequestedAtUnixMs = 0L
+        attempt.odaRequestedElapsedMs = 0L
     }
 
     private fun appendRecord(

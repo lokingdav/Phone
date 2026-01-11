@@ -46,8 +46,8 @@ class CallService : InCallService() {
 
     override fun onCallAdded(call: Call) {
         super.onCallAdded(call)
-        CallManager.onCallAdded(call)
         CallManager.inCallService = this
+        CallManager.onCallAdded(call)
         CallManager.addListener(callManagerListener)
         call.registerCallback(callListener)
 
