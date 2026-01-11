@@ -2,10 +2,12 @@ package org.fossify.phone.activities
 
 import android.annotation.TargetApi
 import android.content.Intent
+import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.Menu
+import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
@@ -24,6 +26,7 @@ import org.fossify.phone.dialogs.ManageVisibleTabsDialog
 import org.fossify.phone.extensions.config
 import org.fossify.phone.fragments.EnrollmentDialogFragment
 import org.fossify.phone.helpers.RecentsHelper
+import org.fossify.phone.metrics.MetricsRecorder
 import org.fossify.phone.models.RecentCall
 import java.util.Locale
 import kotlin.system.exitProcess
@@ -75,6 +78,30 @@ class SettingsActivity : SimpleActivity() {
         }
     }
 
+    private fun setupDiaResetResults() {
+        binding.settingsDiaResetResultsHolder.setOnClickListener {
+            val density = resources.displayMetrics.density
+            val titlePadding = (20 * density).toInt()
+            val titleView = TextView(this).apply {
+                text = "Reset Results"
+                setTextColor(getColor(R.color.md_red_700))
+                setTypeface(typeface, Typeface.BOLD)
+                textSize = 20f
+                setPadding(titlePadding, titlePadding, titlePadding, titlePadding)
+            }
+
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setCustomTitle(titleView)
+                .setMessage("Delete the results CSV file?")
+                .setPositiveButton(android.R.string.ok) { _, _ ->
+                    val ok = MetricsRecorder.clearResults(this)
+                    toast(if (ok) "Results cleared" else "Failed to clear results")
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         setupToolbar(binding.settingsToolbar, NavigationIcon.Arrow)
@@ -87,6 +114,7 @@ class SettingsActivity : SimpleActivity() {
         setupManageSpeedDial()
         setupDiaProtocolToggle()
         setupEnrollment()
+        setupDiaResetResults()
         setupChangeDateTimeFormat()
         setupFontSize()
         setupManageShownTabs()

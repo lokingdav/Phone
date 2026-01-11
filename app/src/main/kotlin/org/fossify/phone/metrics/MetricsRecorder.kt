@@ -69,6 +69,22 @@ object MetricsRecorder {
         appContext = context.applicationContext
     }
 
+    fun clearResults(context: Context): Boolean {
+        synchronized(fileLock) {
+            return try {
+                val file = resultsFile(context.applicationContext)
+                if (file.exists()) {
+                    file.delete()
+                } else {
+                    true
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed clearing results: ${e.message}", e)
+                false
+            }
+        }
+    }
+
     fun markOutgoingDial(peerPhone: String, protocolEnabled: Boolean) {
         val nowUnixMs = System.currentTimeMillis()
         val nowElapsedMs = SystemClock.elapsedRealtime()

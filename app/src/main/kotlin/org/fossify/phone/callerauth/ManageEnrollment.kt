@@ -96,8 +96,10 @@ object ManageEnrollment {
      * Calls the enrollment server via gRPC.
      */
     private fun callServer(req: Enrollment.EnrollmentRequest): Enrollment.EnrollmentResponse {
+        val esHost = Storage.getEffectiveEsHost()
+        val esPort = Storage.getEffectiveEsPort()
         val channel = ManagedChannelBuilder
-            .forAddress(BuildConfig.ES_HOST, BuildConfig.ES_PORT)
+            .forAddress(esHost, esPort)
             .usePlaintext()
             .build()
 

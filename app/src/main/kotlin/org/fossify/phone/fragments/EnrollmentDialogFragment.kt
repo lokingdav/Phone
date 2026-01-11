@@ -12,6 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.fossify.phone.R
 import org.fossify.phone.callerauth.AuthService
+import org.fossify.phone.callerauth.Storage
 import androidx.lifecycle.lifecycleScope
 
 class EnrollmentDialogFragment : DialogFragment() {
@@ -19,6 +20,11 @@ class EnrollmentDialogFragment : DialogFragment() {
     private lateinit var phoneNumberInput: EditText
     private lateinit var displayNameInput: EditText
     private lateinit var logoUrlInput: EditText
+
+    private lateinit var esHostInput: EditText
+    private lateinit var esPortInput: EditText
+    private lateinit var rsHostInput: EditText
+    private lateinit var rsPortInput: EditText
 
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
         val builder = MaterialAlertDialogBuilder(requireActivity())
@@ -29,6 +35,11 @@ class EnrollmentDialogFragment : DialogFragment() {
         phoneNumberInput = view.findViewById(R.id.phone_number_input)
         displayNameInput = view.findViewById(R.id.display_name_input)
         logoUrlInput = view.findViewById(R.id.logo_url_input)
+
+        esHostInput = view.findViewById(R.id.es_host_input)
+        esPortInput = view.findViewById(R.id.es_port_input)
+        rsHostInput = view.findViewById(R.id.rs_host_input)
+        rsPortInput = view.findViewById(R.id.rs_port_input)
 
         builder.setView(view)
             .setTitle("Device Enrollment")
@@ -52,6 +63,13 @@ class EnrollmentDialogFragment : DialogFragment() {
             logoUrlInput.setText("https://i.pravatar.cc/150?img=${(1..100).random()}")
         }
 
+        // Prefill current effective values for convenience.
+        // Users can clear a field to revert to BuildConfig defaults.
+        esHostInput.setText(Storage.getEffectiveEsHost())
+        esPortInput.setText(Storage.getEffectiveEsPort().toString())
+        rsHostInput.setText(Storage.getEffectiveRsHost())
+        rsPortInput.setText(Storage.getEffectiveRsPort().toString())
+
         dialog?.let {
             val positiveButton: Button = it.getButton(Dialog.BUTTON_POSITIVE)
             positiveButton.setOnClickListener {
@@ -60,10 +78,19 @@ class EnrollmentDialogFragment : DialogFragment() {
                 val displayName = displayNameInput.text.toString()
                 val logoUrl = logoUrlInput.text.toString()
 
+                val esHostRaw = esHostInput.text.toString().trim()
+                val esPortRaw = esPortInput.text.toString().trim()
+                val rsHostRaw = rsHostInput.text.toString().trim()
+                val rsPortRaw = rsPortInput.text.toString().trim()
+
                 // Reset previous errors
                 phoneNumberInput.error = null
                 displayNameInput.error = null
                 logoUrlInput.error = null
+                esHostInput.error = null
+                esPortInput.error = null
+                rsHostInput.error = null
+                rsPortInput.error = null
 
                 var isValid = true
 
@@ -83,8 +110,28 @@ class EnrollmentDialogFragment : DialogFragment() {
                     isValid = false
                 }
 
+                val esPort = esPortRaw.toIntOrNull()
+                val rsPort = rsPortRaw.toIntOrNull()
+
+                if (esHostRaw.isNotBlank() && (esPort == null || esPort !in 1..65535)) {
+                    esPortInput.error = "Invalid ES port (1-65535)."
+                    isValid = false
+                }
+
+                if (rsHostRaw.isNotBlank() && (rsPort == null || rsPort !in 1..65535)) {
+                    rsPortInput.error = "Invalid RS port (1-65535)."
+                    isValid = false
+                }
+
                 // If all fields are valid, proceed and close the dialog
                 if (isValid) {
+                    // Persist server overrides before enrolling.
+                    // Blank host clears the override and reverts to BuildConfig defaults.
+                    Storage.saveEsHostOverride(esHostRaw.ifBlank { null })
+                    Storage.saveEsPortOverride(if (esHostRaw.isBlank()) null else esPort)
+                    Storage.saveRsHostOverride(rsHostRaw.ifBlank { null })
+                    Storage.saveRsPortOverride(if (rsHostRaw.isBlank()) null else rsPort)
+
                     // Disable button during enrollment to prevent multiple submissions
                     positiveButton.isEnabled = false
                     positiveButton.text = "Enrolling..."

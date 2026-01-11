@@ -135,8 +135,8 @@ object AuthService {
                 
                 // Start OOB channel on AKE topic
                 val oob = OobController(
-                    relayHost = BuildConfig.RS_HOST,
-                    relayPort = BuildConfig.RS_PORT,
+                    relayHost = Storage.getEffectiveRsHost(),
+                    relayPort = Storage.getEffectiveRsPort(),
                     initialTopic = akeTopic,
                     ticket = ticket,
                     senderID = senderID,
@@ -233,8 +233,8 @@ object AuthService {
                 
                 // Start OOB channel on AKE topic (will receive AKE_REQUEST via replay)
                 val oob = OobController(
-                    relayHost = BuildConfig.RS_HOST,
-                    relayPort = BuildConfig.RS_PORT,
+                    relayHost = Storage.getEffectiveRsHost(),
+                    relayPort = Storage.getEffectiveRsPort(),
                     initialTopic = akeTopic,
                     ticket = ticket,
                     senderID = senderID,

@@ -61,8 +61,24 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_centerVertical="true"
-                    android:text="Enroll New Number"
+                    android:text="Configure &amp; Enroll"
                     android:id="@+id/settings_enrollment"/>
+
+            </RelativeLayout>
+
+            <RelativeLayout
+                android:id="@+id/settings_dia_reset_results_holder"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="?attr/selectableItemBackground"
+                android:padding="@dimen/activity_margin">
+
+                <org.fossify.commons.views.MyTextView
+                    android:id="@+id/settings_dia_reset_results"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_centerVertical="true"
+                    android:text="Reset Results" />
 
             </RelativeLayout>
 
