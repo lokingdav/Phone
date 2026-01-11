@@ -25,7 +25,7 @@ import org.fossify.phone.BuildConfig
  *   2. akeInit() + subscribe to AKE topic (gets AKE_REQUEST via replay)
  *   3. Receive AKE_REQUEST → akeResponse() → send AKE_RESPONSE
  *   4. Receive AKE_COMPLETE → akeFinalize()
- *   5. Transition to RUA, swap to RUA topic
+ *   5. Transition to RUA, subscribe to RUA topic
  *   6. ruaInit() + receive RUA_REQUEST → ruaResponse() → send RUA_RESPONSE
  *   7. Ring phone
  */
@@ -273,6 +273,19 @@ object AuthService {
                         Log.d(TAG, "Ignoring self-authored message")
                         return@use
                     }
+
+                    // Always honor BYE even if topic mismatches due to in-flight switching
+                    if (msgType == MSG_BYE) {
+                        Log.d(TAG, "Received BYE message - ending call")
+                        endCallCleanup()
+                        return@use
+                    }
+
+                    // Heartbeats are allowed on any topic; ignore them
+                    if (msgType == MSG_HEARTBEAT) {
+                        Log.v(TAG, "Received HEARTBEAT message")
+                        return@use
+                    }
                     
                     // Topic validation - only filter if topics don't match
                     // Note: During topic transitions, we may receive messages from the old topic
@@ -282,13 +295,6 @@ object AuthService {
                     }
                     
                     Log.d(TAG, "✓ Accepted message type=$msgType")
-                    
-                    // Handle BYE message
-                    if (msgType == MSG_BYE) {
-                        Log.d(TAG, "Received BYE message - ending call")
-                        endCallCleanup()
-                        return@use
-                    }
                     
                     // Route based on role
                     if (callState.isCaller) {
@@ -330,6 +336,11 @@ object AuthService {
             // Process response → get AKE_COMPLETE message and shared key
             val completeMsg = callState.akeComplete(rawData)
             Log.d(TAG, "✓ AKE Complete! Shared key established")
+
+            // Send AKE_COMPLETE ASAP on the old AKE topic so the recipient can finalize before we switch topics.
+            // (Matches denseid sipcontroller ordering.)
+            oobController?.sendToTopic(oldAkeTopic, completeMsg)
+            Log.d(TAG, "Sent AKE_COMPLETE on old topic")
             
             // Derive RUA topic
             val ruaTopic = callState.ruaDeriveTopic()
@@ -338,19 +349,15 @@ object AuthService {
             // Create RUA request before transitioning
             val ruaRequest = callState.ruaRequest()
             
-            // Transition to RUA state
-            callState.transitionToRua()
-            
             // Get ticket for topic creation
             val ticket = callState.ticket
             
+            // Transition to RUA state
+            callState.transitionToRua()
+
             // Subscribe to RUA topic with piggyback RUA request
             oobController?.subscribeToNewTopic(ruaTopic, ruaRequest, ticket)
             Log.d(TAG, "Subscribed to RUA topic with RUA_REQUEST")
-            
-            // Send AKE_COMPLETE back on old AKE topic
-            oobController?.sendToTopic(oldAkeTopic, completeMsg)
-            Log.d(TAG, "Sent AKE_COMPLETE on old topic")
             
             Log.d(TAG, "Waiting for RUA_RESPONSE...")
             
@@ -445,9 +452,9 @@ object AuthService {
             // Transition to RUA state
             callState.transitionToRua()
             
-            // Swap to RUA topic (with replay to get RUA_REQUEST)
-            oobController?.swapToTopic(ruaTopic)
-            Log.d(TAG, "Swapped to RUA topic")
+            // Subscribe to RUA topic (with replay to get RUA_REQUEST)
+            oobController?.subscribeToNewTopic(ruaTopic, piggybackMessage = null, ticket = callState.ticket)
+            Log.d(TAG, "Subscribed to RUA topic")
             
             // Initialize RUA
             callState.ruaInit()

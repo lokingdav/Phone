@@ -12,7 +12,7 @@ class OobController(
     private val relayHost: String,
     private val relayPort: Int,
     initialTopic: String,
-    ticket: ByteArray?,
+    ticket: ByteArray,
     private val senderID: String,
     private val scope: CoroutineScope,
     useTls: Boolean = true,
@@ -96,18 +96,9 @@ class OobController(
     }
 
     /**
-     * Swaps to a new topic with optional first message.
-     * Used for protocol flows like topic rotation during rekeying.
-     */
-    suspend fun swapToTopic(newTopic: String, firstMessage: ByteArray? = null, ticket: ByteArray? = null) {
-        Log.d(TAG, "Swapping to topic: $newTopic")
-        session.swapToTopic(newTopic, firstMessage, ticket)
-    }
-
-    /**
      * Subscribes to a new topic (with replay) and optionally sends a message.
      */
-    suspend fun subscribeToNewTopic(newTopic: String, piggybackMessage: ByteArray? = null, ticket: ByteArray? = null) {
+    suspend fun subscribeToNewTopic(newTopic: String, piggybackMessage: ByteArray? = null, ticket: ByteArray) {
         Log.d(TAG, "Subscribing to new topic: $newTopic")
         session.subscribeToNewTopic(newTopic, piggybackMessage, ticket)
     }

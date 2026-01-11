@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class RelaySession(
     private val client: RelayClient,
     initialTopic: String,
-    private val ticket: ByteArray?,
+    private val ticket: ByteArray,
     private val senderID: String = UUID.randomUUID().toString()
 ) {
     companion object {
@@ -77,13 +77,11 @@ class RelaySession(
         }
 
         val topic = topicMutex.withLock { currentTopic }
-        val ticketBytes = ticket
         val request = Relay.RelayRequest.newBuilder()
             .setSenderId(senderID)
             .setType(Relay.RelayRequest.Type.PUBLISH)
             .setTopic(topic)
             .setPayload(ByteString.copyFrom(payload))
-            .apply { ticketBytes?.let { setTicket(ByteString.copyFrom(it)) } }
             .build()
         
         enqueue(request)
@@ -102,42 +100,15 @@ class RelaySession(
             .setType(Relay.RelayRequest.Type.PUBLISH)
             .setTopic(topic)
             .setPayload(ByteString.copyFrom(payload))
-            .apply { ticket?.let { setTicket(ByteString.copyFrom(it)) } }
             .build()
         
-        enqueue(request)
-    }
-
-    /**
-     * Swaps from current topic to a new topic with optional first message.
-     * Used for protocol flows like Bob swapping from Alice's topic to Bob's topic.
-     */
-    suspend fun swapToTopic(toTopic: String, firstMessage: ByteArray? = null, ticket: ByteArray? = null) {
-        if (closed.get() || toTopic.isEmpty()) {
-            return
-        }
-
-        val fromTopic = topicMutex.withLock { currentTopic }
-        val request = Relay.RelayRequest.newBuilder()
-            .setSenderId(senderID)
-            .setType(Relay.RelayRequest.Type.SWAP)
-            .setTopic(fromTopic)
-            .setToTopic(toTopic)
-            .apply { 
-                firstMessage?.let { setPayload(ByteString.copyFrom(it)) }
-                ticket?.let { setTicket(ByteString.copyFrom(it)) }
-            }
-            .build()
-        
-        // Update local topic optimistically
-        topicMutex.withLock { currentTopic = toTopic }
         enqueue(request)
     }
 
     /**
      * Subscribes to a new topic with replay, optionally piggy-backing a publish.
      */
-    suspend fun subscribeToNewTopic(newTopic: String, piggybackPayload: ByteArray? = null, ticket: ByteArray? = null) {
+    suspend fun subscribeToNewTopic(newTopic: String, piggybackPayload: ByteArray? = null, ticket: ByteArray) {
         if (closed.get() || newTopic.isEmpty()) {
             return
         }
@@ -148,7 +119,7 @@ class RelaySession(
             .setTopic(newTopic)
             .apply {
                 piggybackPayload?.let { setPayload(ByteString.copyFrom(it)) }
-                ticket?.let { setTicket(ByteString.copyFrom(it)) }
+                setTicket(ByteString.copyFrom(ticket))
             }
             .build()
         
@@ -192,11 +163,11 @@ class RelaySession(
                         .setSenderId(senderID)
                         .setType(Relay.RelayRequest.Type.SUBSCRIBE)
                         .setTopic(topic)
-                        .apply { ticketBytes?.let { setTicket(ByteString.copyFrom(it)) } }
+                        .setTicket(ByteString.copyFrom(ticket))
                         .build()
                     
                     emit(subscribeRequest)
-                    Log.d(TAG, "Sent initial SUBSCRIBE to topic: $topic (ticket: ${ticketBytes != null})")
+                    Log.d(TAG, "Sent initial SUBSCRIBE to topic: $topic")
                     
                     // Then pump queued requests
                     sendQueue.receiveAsFlow().collect { emit(it) }

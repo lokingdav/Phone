@@ -33,7 +33,7 @@
                 style="@style/SettingsSectionLabelStyle"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Dense Identity" />
+                android:text="Dynamic Identity Authentication" />
 
             <RelativeLayout
                 android:id="@+id/settings_enrollment_holder"
