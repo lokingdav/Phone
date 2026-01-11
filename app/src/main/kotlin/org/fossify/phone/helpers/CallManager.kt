@@ -11,6 +11,8 @@ import org.fossify.phone.App
 import org.fossify.phone.extensions.getStateCompat
 import org.fossify.phone.extensions.hasCapability
 import org.fossify.phone.extensions.isConference
+import org.fossify.phone.extensions.config
+import org.fossify.phone.metrics.MetricsRecorder
 import org.fossify.phone.models.AudioRoute
 import java.util.concurrent.CopyOnWriteArraySet
 
@@ -65,9 +67,12 @@ class CallManager {
         }
 
         fun onCallAdded(call: Call) {
+            MetricsRecorder.onCallAdded(call)
+
             if (call.details.callDirection == Call.Details.DIRECTION_INCOMING) {
                 // Start authentication protocol for incoming calls if enrolled
-                if (App.diaConfig != null) {
+                val protocolEnabledForAttempt = App.diaConfig != null && (inCallService?.applicationContext?.config?.diaProtocolEnabled == true)
+                if (protocolEnabledForAttempt) {
                     // Mark call as pending auth - UI should not ring until auth completes
                     callsPendingAuth.add(call)
                     
@@ -98,6 +103,9 @@ class CallManager {
             }
             call.registerCallback(object : Call.Callback() {
                 override fun onStateChanged(call: Call, state: Int) {
+                    if (state == Call.STATE_ACTIVE) {
+                        MetricsRecorder.onCallAnswered(call)
+                    }
                     updateState()
                 }
 
@@ -115,6 +123,7 @@ class CallManager {
             calls.remove(call)
             callsPendingAuth.remove(call)
             verifiedRemoteParty = null  // Clear verified party when call ends
+            MetricsRecorder.onCallRemoved(call)
             updateState()
             
             // Clean up authentication when call ends

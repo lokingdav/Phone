@@ -3,6 +3,7 @@ package org.fossify.phone
 import android.util.Log
 import org.fossify.commons.FossifyApp
 import org.fossify.phone.callerauth.Storage
+import org.fossify.phone.metrics.MetricsRecorder
 import io.github.lokingdav.libdia.DiaConfig
 
 class App : FossifyApp() {
@@ -44,6 +45,7 @@ class App : FossifyApp() {
         super.onCreate()
 
         Storage.init(this)
+        MetricsRecorder.init(this)
         
         // Load saved DiaConfig if user is enrolled
         reloadDiaConfig()

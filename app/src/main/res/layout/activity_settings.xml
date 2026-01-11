@@ -36,6 +36,21 @@
                 android:text="Dynamic Identity Authentication" />
 
             <RelativeLayout
+                android:id="@+id/settings_dia_protocol_holder"
+                style="@style/SettingsHolderSwitchStyle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <org.fossify.commons.views.MyMaterialSwitch
+                    android:id="@+id/settings_dia_protocol"
+                    style="@style/SettingsSwitchStyle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Enable DIA protocol" />
+
+            </RelativeLayout>
+
+            <RelativeLayout
                 android:id="@+id/settings_enrollment_holder"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"

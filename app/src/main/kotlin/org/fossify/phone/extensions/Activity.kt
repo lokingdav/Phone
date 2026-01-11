@@ -19,13 +19,16 @@ import org.fossify.phone.dialogs.SelectSIMDialog
 import org.fossify.phone.callerauth.AuthService
 import org.fossify.phone.helpers.CallManager
 import org.fossify.phone.App
+import org.fossify.phone.metrics.MetricsRecorder
 import android.util.Log
 
 fun SimpleActivity.startCallIntent(recipient: String) {
     Log.d("CallAuth", "startCallIntent called for: $recipient")
     
-    // If enrolled, start authentication protocol before placing call
-    if (App.diaConfig != null) {
+    val protocolEnabledForAttempt = App.diaConfig != null && config.diaProtocolEnabled
+
+    // If enrolled and enabled, start authentication protocol before placing call
+    if (protocolEnabledForAttempt) {
         Log.d("CallAuth", "User is enrolled, starting auth protocol")
         
         // Capture activity reference for callback
@@ -38,6 +41,7 @@ fun SimpleActivity.startCallIntent(recipient: String) {
                 // Authentication initialized, now place the actual call
                 activity.runOnUiThread {
                     try {
+                        MetricsRecorder.markOutgoingDial(recipient, protocolEnabled = true)
                         if (activity.isDefaultDialer()) {
                             activity.getHandleToUse(null, recipient) { handle ->
                                 activity.launchCallIntent(recipient, handle)
@@ -62,8 +66,9 @@ fun SimpleActivity.startCallIntent(recipient: String) {
             }
         )
     } else {
-        Log.d("CallAuth", "User not enrolled, placing call directly")
-        // Not enrolled - place call directly without authentication
+        Log.d("CallAuth", "Protocol disabled or not enrolled, placing call directly")
+        // Place call directly without authentication
+        MetricsRecorder.markOutgoingDial(recipient, protocolEnabled = false)
         if (isDefaultDialer()) {
             getHandleToUse(null, recipient) { handle ->
                 launchCallIntent(recipient, handle)

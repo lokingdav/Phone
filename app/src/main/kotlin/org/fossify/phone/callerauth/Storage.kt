@@ -8,6 +8,7 @@ private const val TAG = "CallAuth"
 object Storage {
     private const val PREFS_NAME = "dense_identity_prefs"
     private const val KEY_DIA_CONFIG = "dia_config_env"
+    private const val KEY_ENROLLED_PHONE = "enrolled_phone"
     
     private lateinit var prefs: SharedPreferences
 
@@ -51,11 +52,20 @@ object Storage {
         return loadDiaConfig() != null
     }
 
+    fun saveEnrolledPhone(phoneNumber: String) {
+        putString(KEY_ENROLLED_PHONE, phoneNumber)
+    }
+
+    fun loadEnrolledPhone(): String? {
+        return getString(KEY_ENROLLED_PHONE)
+    }
+
     /**
      * Clears enrollment data.
      */
     fun clearEnrollment() {
         Log.d(TAG, "Clearing enrollment data")
         putString(KEY_DIA_CONFIG, null)
+        putString(KEY_ENROLLED_PHONE, null)
     }
 }

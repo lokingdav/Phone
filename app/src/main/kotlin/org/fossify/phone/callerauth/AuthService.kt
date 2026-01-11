@@ -6,6 +6,8 @@ import io.github.lokingdav.libdia.*
 import kotlinx.coroutines.*
 import org.fossify.phone.App
 import org.fossify.phone.BuildConfig
+import org.fossify.phone.helpers.CallManager
+import org.fossify.phone.metrics.MetricsRecorder
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -367,7 +369,7 @@ object AuthService {
             Log.d(TAG, "✓ AKE Complete! Shared key established")
 
             // Send AKE_COMPLETE ASAP on the old AKE topic so the recipient can finalize before we switch topics.
-            // (Matches denseid sipcontroller ordering.)
+            // (Matches dia sipcontroller ordering.)
             oobController?.sendToTopic(oldAkeTopic, completeMsg)
             Log.d(TAG, "Sent AKE_COMPLETE on old topic")
             
@@ -600,6 +602,7 @@ object AuthService {
             odaTimeoutJob = launch {
                 delay(ODA_TIMEOUT_MS)
                 if (odaInFlight.compareAndSet(true, false)) {
+                    CallManager.getPrimaryCall()?.let { MetricsRecorder.onOdaCompleted(it, outcome = "oda_timeout", error = "oda timeout") }
                     val cb = odaErrorCallback
                     clearOdaCallbacks()
                     withContext(Dispatchers.Main) { cb?.invoke("On-demand auth timed out") }
@@ -608,6 +611,7 @@ object AuthService {
 
             try {
                 val request = callState.odaRequest(attributes)
+                CallManager.getPrimaryCall()?.let { MetricsRecorder.onOdaRequested(it) }
                 oob.send(request)
                 Log.d(TAG, "Sent ODA_REQUEST (${request.size} bytes) attrs=$attributes")
             } catch (e: Exception) {
@@ -615,6 +619,7 @@ object AuthService {
                 odaTimeoutJob?.cancel()
                 odaTimeoutJob = null
                 odaInFlight.set(false)
+                CallManager.getPrimaryCall()?.let { MetricsRecorder.onOdaCompleted(it, outcome = "error", error = e.message ?: "oda request failed") }
                 val cb = odaErrorCallback
                 clearOdaCallbacks()
                 withContext(Dispatchers.Main) { cb?.invoke(e.message ?: "Failed to start on-demand auth") }
@@ -652,6 +657,8 @@ object AuthService {
                 "ODA verification: verified=${verification.verified} issuer=${verification.issuer} credentialType=${verification.credentialType} disclosed=${verification.disclosedAttributes.keys}"
             )
 
+            CallManager.getPrimaryCall()?.let { MetricsRecorder.onOdaCompleted(it, outcome = "oda_done") }
+
             odaTimeoutJob?.cancel()
             odaTimeoutJob = null
             odaInFlight.set(false)
@@ -666,6 +673,7 @@ object AuthService {
             odaTimeoutJob?.cancel()
             odaTimeoutJob = null
             odaInFlight.set(false)
+            CallManager.getPrimaryCall()?.let { MetricsRecorder.onOdaCompleted(it, outcome = "error", error = e.message ?: "oda verify failed") }
             val cb = odaErrorCallback
             clearOdaCallbacks()
             withContext(Dispatchers.Main) {

@@ -823,6 +823,10 @@ class CallActivity : SimpleActivity() {
     }
 
     private fun manageOnDemandAuth() {
+        if (!config.diaProtocolEnabled) {
+            toast("DIA protocol is disabled")
+            return
+        }
         if (isOnDemandAuthActive) {
             return
         }

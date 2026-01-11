@@ -9,6 +9,7 @@ import org.fossify.commons.helpers.BaseConfig
 import org.fossify.phone.extensions.getPhoneAccountHandleModel
 import org.fossify.phone.extensions.putPhoneAccountHandle
 import org.fossify.phone.models.SpeedDial
+import org.fossify.phone.helpers.DIA_PROTOCOL_ENABLED
 
 class Config(context: Context) : BaseConfig(context) {
     companion object {
@@ -89,4 +90,8 @@ class Config(context: Context) : BaseConfig(context) {
     var alwaysShowFullscreen: Boolean
         get() = prefs.getBoolean(ALWAYS_SHOW_FULLSCREEN, false)
         set(alwaysShowFullscreen) = prefs.edit().putBoolean(ALWAYS_SHOW_FULLSCREEN, alwaysShowFullscreen).apply()
+
+    var diaProtocolEnabled: Boolean
+        get() = prefs.getBoolean(DIA_PROTOCOL_ENABLED, true)
+        set(enabled) = prefs.edit().putBoolean(DIA_PROTOCOL_ENABLED, enabled).apply()
 }

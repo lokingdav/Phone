@@ -20,6 +20,9 @@ const val DIALPAD_BEEPS = "dialpad_beeps"
 const val HIDE_DIALPAD_NUMBERS = "hide_dialpad_numbers"
 const val ALWAYS_SHOW_FULLSCREEN = "always_show_fullscreen"
 
+// Dynamic Identity Authentication
+const val DIA_PROTOCOL_ENABLED = "dia_protocol_enabled"
+
 const val ALL_TABS_MASK = TAB_CONTACTS or TAB_FAVORITES or TAB_CALL_HISTORY
 
 val tabsList = arrayListOf(TAB_CONTACTS, TAB_FAVORITES, TAB_CALL_HISTORY)

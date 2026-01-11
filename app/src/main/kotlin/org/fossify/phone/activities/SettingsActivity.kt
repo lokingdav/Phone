@@ -85,6 +85,7 @@ class SettingsActivity : SimpleActivity() {
         setupLanguage()
         setupManageBlockedNumbers()
         setupManageSpeedDial()
+        setupDiaProtocolToggle()
         setupEnrollment()
         setupChangeDateTimeFormat()
         setupFontSize()
@@ -114,6 +115,16 @@ class SettingsActivity : SimpleActivity() {
                 settingsMigrationSectionLabel
             ).forEach {
                 it.setTextColor(getProperPrimaryColor())
+            }
+        }
+    }
+
+    private fun setupDiaProtocolToggle() {
+        binding.apply {
+            settingsDiaProtocol.isChecked = config.diaProtocolEnabled
+            settingsDiaProtocolHolder.setOnClickListener {
+                settingsDiaProtocol.toggle()
+                config.diaProtocolEnabled = settingsDiaProtocol.isChecked
             }
         }
     }

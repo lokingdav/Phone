@@ -70,6 +70,7 @@ object ManageEnrollment {
             // Step 5: Serialize and save config
             val envString = config.toEnv()
             Storage.saveDiaConfig(envString)
+            Storage.saveEnrolledPhone(phoneNumber)
             Log.d(TAG, "✓ Config saved to storage")
             
             // Step 6: Reload App.diaConfig so it's immediately available
