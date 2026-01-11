@@ -7,6 +7,8 @@ import android.content.Intent
 import android.graphics.drawable.LayerDrawable
 import android.graphics.drawable.RippleDrawable
 import android.media.AudioManager
+import android.graphics.Color
+import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -21,11 +23,17 @@ import android.view.WindowManager
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import android.widget.ImageView
+import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.core.content.res.ResourcesCompat
 import androidx.core.os.postDelayed
 import androidx.core.view.children
 import androidx.core.view.setPadding
 import androidx.core.view.updatePadding
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.text.style.StyleSpan
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.RequestOptions
 import org.fossify.commons.extensions.*
@@ -40,6 +48,7 @@ import org.fossify.phone.extensions.*
 import org.fossify.phone.helpers.*
 import org.fossify.phone.models.AudioRoute
 import org.fossify.phone.models.CallContact
+import io.github.lokingdav.libdia.OdaVerification
 import kotlin.math.max
 import kotlin.math.min
 
@@ -710,7 +719,7 @@ class CallActivity : SimpleActivity() {
                 || state == Call.STATE_DISCONNECTING || state == Call.STATE_HOLDING)
             setActionButtonEnabled(binding.callToggleHold, isSingleCallActionsEnabled)
             setActionButtonEnabled(binding.callAdd, isSingleCallActionsEnabled)
-            setActionButtonEnabled(binding.callOnDemandAuth, isSingleCallActionsEnabled)
+            setActionButtonEnabled(binding.callOnDemandAuth, isSingleCallActionsEnabled && !isOnDemandAuthActive)
         } else if (phoneState is TwoCalls) {
             updateCallState(phoneState.active)
             updateCallOnHoldState(phoneState.onHold)
@@ -814,11 +823,73 @@ class CallActivity : SimpleActivity() {
     }
 
     private fun manageOnDemandAuth() {
-        // TODO: Migrate to LibDia v2 - implement on-demand auth
-        // isOnDemandAuthActive = AuthService.requestOnDemandAuthentication()
-        Log.d("CallAuth", "On-demand auth not implemented")
-        isOnDemandAuthActive = false
+        if (isOnDemandAuthActive) {
+            return
+        }
+
+        isOnDemandAuthActive = true
         updateOnDemandAuthButtonState()
+        updateState()
+
+        val attrs = listOf("name", "issuer")
+        AuthService.requestOnDemandAuthentication(
+            attributes = attrs,
+            onResult = { verification ->
+                isOnDemandAuthActive = false
+                updateOnDemandAuthButtonState()
+                updateState()
+                showOdaResultDialog(verification)
+            },
+            onError = { msg ->
+                isOnDemandAuthActive = false
+                updateOnDemandAuthButtonState()
+                updateState()
+                toast(msg)
+            }
+        )
+    }
+
+    private fun showOdaResultDialog(verification: OdaVerification) {
+        val density = resources.displayMetrics.density
+        val titlePadding = (20 * density).toInt()
+        val titleView = TextView(this).apply {
+            text = "On-demand authentication"
+            setTextColor(Color.BLACK)
+            setTypeface(typeface, Typeface.BOLD)
+            textSize = 20f
+            setPadding(titlePadding)
+        }
+
+        val message = SpannableStringBuilder()
+        val statusLabel = "Status: "
+        val statusValue = if (verification.verified) "VERIFIED" else "NOT VERIFIED"
+        val statusStart = message.length
+        message.append(statusLabel).append(statusValue).append("\n")
+        val statusValueStart = statusStart + statusLabel.length
+        val statusValueEnd = statusValueStart + statusValue.length
+        val statusColor = getColor(if (verification.verified) R.color.md_green_700 else R.color.md_red_700)
+        message.setSpan(ForegroundColorSpan(statusColor), statusValueStart, statusValueEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        message.setSpan(StyleSpan(Typeface.BOLD), statusValueStart, statusValueEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+
+        message.append("Issuer: ${verification.issuer}\n")
+        message.append("Credential: ${verification.credentialType}\n")
+        message.append("Issued: ${verification.issuanceDate}\n")
+        message.append("Expires: ${verification.expirationDate}\n")
+        message.append("\n")
+        message.append("Disclosed attributes:\n")
+        if (verification.disclosedAttributes.isEmpty()) {
+            message.append("(none)\n")
+        } else {
+            verification.disclosedAttributes.forEach { (k, v) ->
+                message.append("$k: $v\n")
+            }
+        }
+
+        AlertDialog.Builder(this)
+            .setCustomTitle(titleView)
+            .setMessage(message)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
     }
 
     private fun updateOnDemandAuthButtonState() {

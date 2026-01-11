@@ -6,6 +6,7 @@ import io.github.lokingdav.libdia.*
 import kotlinx.coroutines.*
 import org.fossify.phone.App
 import org.fossify.phone.BuildConfig
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Authentication service using LibDia v2 API.
@@ -32,6 +33,7 @@ import org.fossify.phone.BuildConfig
 object AuthService {
     private const val TAG = "CallAuth"
     private const val PROTOCOL_TIMEOUT_MS = 15_000L
+    private const val ODA_TIMEOUT_MS = 15_000L
 
     // Service-wide background scope for network I/O
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -39,6 +41,15 @@ object AuthService {
     // Current call state and OOB controller (one active call at a time)
     @Volatile private var currentCallState: CallState? = null
     @Volatile private var oobController: OobController? = null
+
+    // RUA completion gate for ODA
+    @Volatile private var ruaComplete: Boolean = false
+
+    // ODA in-flight state (allow multiple ODAs over call lifetime, but only one at a time)
+    private val odaInFlight = AtomicBoolean(false)
+    @Volatile private var odaTimeoutJob: Job? = null
+    @Volatile private var odaResultCallback: ((OdaVerification) -> Unit)? = null
+    @Volatile private var odaErrorCallback: ((String) -> Unit)? = null
     
     // Callbacks for protocol completion
     @Volatile private var onReadyToCallCallback: (() -> Unit)? = null
@@ -103,6 +114,8 @@ object AuthService {
                 // Create call state for outgoing call
                 val callState = CallState.create(config, recipient, outgoing = true)
                 currentCallState = callState
+
+                resetSessionState()
                 
                 // Initialize AKE (generates DH keys, computes AKE topic)
                 callState.akeInit()
@@ -200,6 +213,8 @@ object AuthService {
                 // Create call state for incoming call
                 val callState = CallState.create(config, callerNumber, outgoing = false)
                 currentCallState = callState
+
+                resetSessionState()
                 
                 // Initialize AKE (generates DH keys, computes AKE topic)
                 callState.akeInit()
@@ -295,6 +310,20 @@ object AuthService {
                     }
                     
                     Log.d(TAG, "✓ Accepted message type=$msgType")
+
+                    // Shared ODA handling (role-agnostic).
+                    // Return early so ODA messages do not enter caller/recipient routing.
+                    when {
+                        message.isOdaRequest -> {
+                            handleOdaRequest(callState, payload)
+                            return@use
+                        }
+
+                        message.isOdaResponse -> {
+                            handleOdaResponse(callState, payload)
+                            return@use
+                        }
+                    }
                     
                     // Route based on role
                     if (callState.isCaller) {
@@ -387,6 +416,8 @@ object AuthService {
             
             // Start heartbeat now that protocol is complete
             oobController?.startHeartbeat()
+
+            ruaComplete = true
             
             // Signal protocol complete
             withContext(Dispatchers.Main) {
@@ -488,6 +519,8 @@ object AuthService {
             
             // Start heartbeat now that protocol is complete
             oobController?.startHeartbeat()
+
+            ruaComplete = true
             
             // Signal protocol complete - phone can ring now!
             withContext(Dispatchers.Main) {
@@ -534,6 +567,127 @@ object AuthService {
     }
 
     /**
+     * Trigger an On-Demand Authentication (ODA) request from the local user.
+     * ODA can occur multiple times during a call, but only one request may be in-flight at a time.
+     */
+    fun requestOnDemandAuthentication(
+        attributes: List<String>,
+        onResult: (OdaVerification) -> Unit,
+        onError: (String) -> Unit = {}
+    ) {
+        serviceScope.launch {
+            val callState = currentCallState
+            val oob = oobController
+            if (callState == null || oob == null) {
+                withContext(Dispatchers.Main) { onError("On-demand auth unavailable") }
+                return@launch
+            }
+
+            if (!ruaComplete || !callState.isRuaActive) {
+                withContext(Dispatchers.Main) { onError("On-demand auth not ready yet") }
+                return@launch
+            }
+
+            if (!odaInFlight.compareAndSet(false, true)) {
+                withContext(Dispatchers.Main) { onError("On-demand auth already in progress") }
+                return@launch
+            }
+
+            odaResultCallback = onResult
+            odaErrorCallback = onError
+
+            odaTimeoutJob?.cancel()
+            odaTimeoutJob = launch {
+                delay(ODA_TIMEOUT_MS)
+                if (odaInFlight.compareAndSet(true, false)) {
+                    val cb = odaErrorCallback
+                    clearOdaCallbacks()
+                    withContext(Dispatchers.Main) { cb?.invoke("On-demand auth timed out") }
+                }
+            }
+
+            try {
+                val request = callState.odaRequest(attributes)
+                oob.send(request)
+                Log.d(TAG, "Sent ODA_REQUEST (${request.size} bytes) attrs=$attributes")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to send ODA request", e)
+                odaTimeoutJob?.cancel()
+                odaTimeoutJob = null
+                odaInFlight.set(false)
+                val cb = odaErrorCallback
+                clearOdaCallbacks()
+                withContext(Dispatchers.Main) { cb?.invoke(e.message ?: "Failed to start on-demand auth") }
+            }
+        }
+    }
+
+    private suspend fun handleOdaRequest(callState: CallState, rawData: ByteArray) {
+        if (!ruaComplete || !callState.isRuaActive) {
+            Log.w(TAG, "Ignoring ODA_REQUEST before RUA is complete")
+            return
+        }
+
+        try {
+            Log.d(TAG, "Handling ODA_REQUEST")
+            val response = callState.odaResponse(rawData)
+            oobController?.send(response)
+            Log.d(TAG, "Sent ODA_RESPONSE (${response.size} bytes)")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed handling ODA_REQUEST", e)
+        }
+    }
+
+    private suspend fun handleOdaResponse(callState: CallState, rawData: ByteArray) {
+        if (!ruaComplete || !callState.isRuaActive) {
+            Log.w(TAG, "Ignoring ODA_RESPONSE before RUA is complete")
+            return
+        }
+
+        try {
+            Log.d(TAG, "Handling ODA_RESPONSE")
+            val verification = callState.odaVerify(rawData)
+            Log.d(
+                TAG,
+                "ODA verification: verified=${verification.verified} issuer=${verification.issuer} credentialType=${verification.credentialType} disclosed=${verification.disclosedAttributes.keys}"
+            )
+
+            odaTimeoutJob?.cancel()
+            odaTimeoutJob = null
+            odaInFlight.set(false)
+            val cb = odaResultCallback
+            clearOdaCallbacks()
+
+            withContext(Dispatchers.Main) {
+                cb?.invoke(verification)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed verifying ODA_RESPONSE", e)
+            odaTimeoutJob?.cancel()
+            odaTimeoutJob = null
+            odaInFlight.set(false)
+            val cb = odaErrorCallback
+            clearOdaCallbacks()
+            withContext(Dispatchers.Main) {
+                cb?.invoke(e.message ?: "On-demand auth verification failed")
+            }
+        }
+    }
+
+    private fun resetSessionState() {
+        ruaComplete = false
+        odaInFlight.set(false)
+        odaTimeoutJob?.cancel()
+        odaTimeoutJob = null
+        clearOdaCallbacks()
+    }
+
+    private fun clearOdaCallbacks() {
+        odaResultCallback = null
+        odaErrorCallback = null
+    }
+
+    /**
      * Cleans up when the call ends.
      */
     fun endCallCleanup() {
@@ -550,6 +704,13 @@ object AuthService {
             Log.d(TAG, "Synchronous cleanup of call auth resources")
             timeoutJob?.cancel()
             timeoutJob = null
+
+            odaTimeoutJob?.cancel()
+            odaTimeoutJob = null
+            odaInFlight.set(false)
+            clearOdaCallbacks()
+            ruaComplete = false
+
             oobController?.stopHeartbeat()
             oobController?.close()
             currentCallState?.close()
@@ -571,6 +732,12 @@ object AuthService {
             Log.d(TAG, "Cleaning up call auth resources")
             timeoutJob?.cancel()
             timeoutJob = null
+
+            odaTimeoutJob?.cancel()
+            odaTimeoutJob = null
+            odaInFlight.set(false)
+            clearOdaCallbacks()
+            ruaComplete = false
             
             // Send BYE message before closing
             try {
