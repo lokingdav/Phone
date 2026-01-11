@@ -5,6 +5,7 @@ import android.content.Context
 import android.telecom.Call
 import android.telecom.CallAudioState
 import android.telecom.InCallService
+import android.telecom.VideoProfile
 import org.fossify.phone.activities.CallActivity
 import org.fossify.phone.extensions.config
 import org.fossify.phone.extensions.isOutgoing
@@ -19,6 +20,15 @@ import org.greenrobot.eventbus.EventBus
 
 class CallService : InCallService() {
     private val callNotificationManager by lazy { CallNotificationManager(this) }
+
+    private fun shouldAutoAnswer(call: Call): Boolean {
+        return call.details.callDirection == Call.Details.DIRECTION_INCOMING && config.autoAnswer
+    }
+
+    private fun autoAnswer(call: Call) {
+        if (call.state != Call.STATE_RINGING) return
+        call.answer(VideoProfile.STATE_AUDIO_ONLY)
+    }
 
     private val callListener = object : Call.Callback() {
         override fun onStateChanged(call: Call, state: Int) {
@@ -39,8 +49,12 @@ class CallService : InCallService() {
         
         override fun onCallAuthCompleted(call: Call, success: Boolean) {
             android.util.Log.d("CallService", "Auth completed for call, showing UI")
-            // Now that authentication is complete, show the call UI
-            showCallUI(call)
+            // Now that authentication is complete, either auto-answer or show UI.
+            if (shouldAutoAnswer(call)) {
+                autoAnswer(call)
+            } else {
+                showCallUI(call)
+            }
         }
     }
 
@@ -55,6 +69,11 @@ class CallService : InCallService() {
         // The UI will be shown when onCallAuthCompleted is called
         if (CallManager.isCallPendingAuth(call)) {
             android.util.Log.d("CallService", "Incoming call pending auth, deferring UI")
+            return
+        }
+
+        if (shouldAutoAnswer(call)) {
+            autoAnswer(call)
             return
         }
 

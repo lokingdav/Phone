@@ -113,6 +113,7 @@ class SettingsActivity : SimpleActivity() {
         setupManageBlockedNumbers()
         setupManageSpeedDial()
         setupDiaProtocolToggle()
+        setupAutoAnswer()
         setupEnrollment()
         setupDiaResetResults()
         setupChangeDateTimeFormat()
@@ -373,6 +374,16 @@ class SettingsActivity : SimpleActivity() {
             settingsDisableSwipeToAnswerHolder.setOnClickListener {
                 settingsDisableSwipeToAnswer.toggle()
                 config.disableSwipeToAnswer = settingsDisableSwipeToAnswer.isChecked
+            }
+        }
+    }
+
+    private fun setupAutoAnswer() {
+        binding.apply {
+            settingsAutoAnswer.isChecked = config.autoAnswer
+            settingsAutoAnswerHolder.setOnClickListener {
+                settingsAutoAnswer.toggle()
+                config.autoAnswer = settingsAutoAnswer.isChecked
             }
         }
     }

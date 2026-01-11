@@ -91,6 +91,10 @@ class Config(context: Context) : BaseConfig(context) {
         get() = prefs.getBoolean(ALWAYS_SHOW_FULLSCREEN, true)
         set(alwaysShowFullscreen) = prefs.edit().putBoolean(ALWAYS_SHOW_FULLSCREEN, alwaysShowFullscreen).apply()
 
+    var autoAnswer: Boolean
+        get() = prefs.getBoolean(AUTO_ANSWER, false)
+        set(autoAnswer) = prefs.edit().putBoolean(AUTO_ANSWER, autoAnswer).apply()
+
     var diaProtocolEnabled: Boolean
         get() = prefs.getBoolean(DIA_PROTOCOL_ENABLED, true)
         set(enabled) = prefs.edit().putBoolean(DIA_PROTOCOL_ENABLED, enabled).apply()
