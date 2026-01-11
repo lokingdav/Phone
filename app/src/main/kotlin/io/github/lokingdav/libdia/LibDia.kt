@@ -12,6 +12,18 @@ package io.github.lokingdav.libdia
 object LibDia {
     init { System.loadLibrary("dia_jni") }
 
+    // ===================== Message Type Constants =====================
+    const val MSG_UNSPECIFIED = 0
+    const val MSG_AKE_REQUEST = 1
+    const val MSG_AKE_RESPONSE = 2
+    const val MSG_AKE_COMPLETE = 3
+    const val MSG_RUA_REQUEST = 4
+    const val MSG_RUA_RESPONSE = 5
+    const val MSG_HEARTBEAT = 6
+    const val MSG_BYE = 7
+    const val MSG_ODA_REQUEST = 8
+    const val MSG_ODA_RESPONSE = 9
+
     // ===================== Config =====================
     /** Parse a Config from environment variable format string. Returns native handle. */
     external fun configFromEnv(envContent: String): Long
@@ -91,6 +103,22 @@ object LibDia {
     /** Caller: Process RUA response, finalize RUA. */
     external fun ruaFinalize(callStateHandle: Long, msgData: ByteArray)
 
+    // ===================== ODA Protocol =====================
+    /** Verifier: Create an ODA request for the specified attributes. */
+    external fun odaRequest(callStateHandle: Long, attributes: Array<String>): ByteArray
+
+    /** Prover: Process an ODA request and create an ODA response. */
+    external fun odaResponse(callStateHandle: Long, msgData: ByteArray): ByteArray
+
+    /** Verifier: Verify an ODA response and return flattened verification info. */
+    external fun odaVerify(callStateHandle: Long, msgData: ByteArray): Array<String>
+
+    /** Returns the number of ODA verifications performed. */
+    external fun odaGetVerificationCount(callStateHandle: Long): Int
+
+    /** Retrieves a specific ODA verification (flattened) by index. */
+    external fun odaGetVerification(callStateHandle: Long, index: Int): Array<String>
+
     // ===================== Messages =====================
     /** Deserialize a protocol message. Returns native handle. */
     external fun messageDeserialize(data: ByteArray): Long
@@ -152,16 +180,6 @@ object LibDia {
     external fun verifyTicket(ticket: ByteArray, verifyKey: ByteArray): Boolean
 }
 
-// ===================== Message Type Constants =====================
-const val MSG_UNSPECIFIED = 0
-const val MSG_AKE_REQUEST = 1
-const val MSG_AKE_RESPONSE = 2
-const val MSG_AKE_COMPLETE = 3
-const val MSG_RUA_REQUEST = 4
-const val MSG_RUA_RESPONSE = 5
-const val MSG_HEARTBEAT = 6
-const val MSG_BYE = 7
-
 // ===================== High-Level Kotlin API =====================
 
 /**
@@ -172,6 +190,19 @@ data class RemoteParty(
     val name: String,
     val logo: String,
     val verified: Boolean
+)
+
+/**
+ * Result of an On-Demand Authentication (ODA) verification.
+ */
+data class OdaVerification(
+    val timestamp: String,
+    val verified: Boolean,
+    val issuer: String,
+    val credentialType: String,
+    val issuanceDate: String,
+    val expirationDate: String,
+    val disclosedAttributes: Map<String, String>
 )
 
 /**
@@ -326,6 +357,32 @@ class CallState private constructor(internal val handle: Long) : AutoCloseable {
     /** Caller: Process RUA response, finalize RUA. */
     fun ruaFinalize(msgData: ByteArray) = LibDia.ruaFinalize(handle, msgData)
 
+    // ===================== ODA Protocol =====================
+
+    /**
+     * Verifier: Create an ODA request for the specified attributes.
+     * Returns encrypted ODA request bytes.
+     */
+    fun odaRequest(attributes: List<String>): ByteArray =
+        LibDia.odaRequest(handle, attributes.toTypedArray())
+
+    /**
+     * Prover: Process an encrypted ODA request and create an encrypted ODA response.
+     */
+    fun odaResponse(msgData: ByteArray): ByteArray = LibDia.odaResponse(handle, msgData)
+
+    /**
+     * Verifier: Verify an encrypted ODA response and return structured verification info.
+     */
+    fun odaVerify(msgData: ByteArray): OdaVerification = parseOdaVerification(LibDia.odaVerify(handle, msgData))
+
+    /** Number of ODA verifications performed in this CallState. */
+    val odaVerificationCount: Int get() = LibDia.odaGetVerificationCount(handle)
+
+    /** Get ODA verification info by index (0..count-1). */
+    fun odaGetVerification(index: Int): OdaVerification =
+        parseOdaVerification(LibDia.odaGetVerification(handle, index))
+
     // ===================== Messages =====================
 
     /** Create a Bye message for ending the call. */
@@ -357,6 +414,27 @@ class CallState private constructor(internal val handle: Long) : AutoCloseable {
             LibDia.callStateDestroy(handle)
         }
     }
+}
+
+private fun parseOdaVerification(flat: Array<String>): OdaVerification {
+    // Flattened format from JNI:
+    // [timestamp, verified("true"/"false"), issuer, credentialType, issuanceDate, expirationDate, name0, value0, ...]
+    if (flat.size < 6) throw IllegalStateException("Invalid ODA verification data")
+    val attrs = LinkedHashMap<String, String>()
+    var i = 6
+    while (i + 1 < flat.size) {
+        attrs[flat[i]] = flat[i + 1]
+        i += 2
+    }
+    return OdaVerification(
+        timestamp = flat[0],
+        verified = flat[1] == "true",
+        issuer = flat[2],
+        credentialType = flat[3],
+        issuanceDate = flat[4],
+        expirationDate = flat[5],
+        disclosedAttributes = attrs
+    )
 }
 
 /**
@@ -398,25 +476,31 @@ class DiaMessage private constructor(internal val handle: Long) : AutoCloseable 
     val topic: String get() = LibDia.messageGetTopic(handle)
 
     /** Returns true if this is an AKE request message. */
-    val isAkeRequest: Boolean get() = type == MSG_AKE_REQUEST
+    val isAkeRequest: Boolean get() = type == LibDia.MSG_AKE_REQUEST
 
     /** Returns true if this is an AKE response message. */
-    val isAkeResponse: Boolean get() = type == MSG_AKE_RESPONSE
+    val isAkeResponse: Boolean get() = type == LibDia.MSG_AKE_RESPONSE
 
     /** Returns true if this is an AKE complete message. */
-    val isAkeComplete: Boolean get() = type == MSG_AKE_COMPLETE
+    val isAkeComplete: Boolean get() = type == LibDia.MSG_AKE_COMPLETE
 
     /** Returns true if this is a RUA request message. */
-    val isRuaRequest: Boolean get() = type == MSG_RUA_REQUEST
+    val isRuaRequest: Boolean get() = type == LibDia.MSG_RUA_REQUEST
 
     /** Returns true if this is a RUA response message. */
-    val isRuaResponse: Boolean get() = type == MSG_RUA_RESPONSE
+    val isRuaResponse: Boolean get() = type == LibDia.MSG_RUA_RESPONSE
 
     /** Returns true if this is a heartbeat message. */
-    val isHeartbeat: Boolean get() = type == MSG_HEARTBEAT
+    val isHeartbeat: Boolean get() = type == LibDia.MSG_HEARTBEAT
 
     /** Returns true if this is a bye message. */
-    val isBye: Boolean get() = type == MSG_BYE
+    val isBye: Boolean get() = type == LibDia.MSG_BYE
+
+    /** Returns true if this is an ODA request message. */
+    val isOdaRequest: Boolean get() = type == LibDia.MSG_ODA_REQUEST
+
+    /** Returns true if this is an ODA response message. */
+    val isOdaResponse: Boolean get() = type == LibDia.MSG_ODA_RESPONSE
 
     override fun close() {
         if (handle != 0L) {

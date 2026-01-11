@@ -275,14 +275,14 @@ object AuthService {
                     }
 
                     // Always honor BYE even if topic mismatches due to in-flight switching
-                    if (msgType == MSG_BYE) {
+                    if (msgType == LibDia.MSG_BYE) {
                         Log.d(TAG, "Received BYE message - ending call")
                         endCallCleanup()
                         return@use
                     }
 
                     // Heartbeats are allowed on any topic; ignore them
-                    if (msgType == MSG_HEARTBEAT) {
+                    if (msgType == LibDia.MSG_HEARTBEAT) {
                         Log.v(TAG, "Received HEARTBEAT message")
                         return@use
                     }
@@ -317,8 +317,8 @@ object AuthService {
      */
     private suspend fun handleCallerMessage(callState: CallState, msgType: Int, rawData: ByteArray) {
         when (msgType) {
-            MSG_AKE_RESPONSE -> handleCallerAkeResponse(callState, rawData)
-            MSG_RUA_RESPONSE -> handleCallerRuaResponse(callState, rawData)
+            LibDia.MSG_AKE_RESPONSE -> handleCallerAkeResponse(callState, rawData)
+            LibDia.MSG_RUA_RESPONSE -> handleCallerRuaResponse(callState, rawData)
             else -> Log.w(TAG, "Caller received unexpected message type: $msgType")
         }
     }
@@ -407,9 +407,9 @@ object AuthService {
      */
     private suspend fun handleRecipientMessage(callState: CallState, msgType: Int, rawData: ByteArray) {
         when (msgType) {
-            MSG_AKE_REQUEST -> handleRecipientAkeRequest(callState, rawData)
-            MSG_AKE_COMPLETE -> handleRecipientAkeComplete(callState, rawData)
-            MSG_RUA_REQUEST -> handleRecipientRuaRequest(callState, rawData)
+            LibDia.MSG_AKE_REQUEST -> handleRecipientAkeRequest(callState, rawData)
+            LibDia.MSG_AKE_COMPLETE -> handleRecipientAkeComplete(callState, rawData)
+            LibDia.MSG_RUA_REQUEST -> handleRecipientRuaRequest(callState, rawData)
             else -> Log.w(TAG, "Recipient received unexpected message type: $msgType")
         }
     }

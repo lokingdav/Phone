@@ -13,6 +13,7 @@ import android.os.Looper
 import android.os.PowerManager
 import android.telecom.Call
 import android.telecom.CallAudioState
+import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
@@ -815,6 +816,7 @@ class CallActivity : SimpleActivity() {
     private fun manageOnDemandAuth() {
         // TODO: Migrate to LibDia v2 - implement on-demand auth
         // isOnDemandAuthActive = AuthService.requestOnDemandAuthentication()
+        Log.d("CallAuth", "On-demand auth not implemented")
         isOnDemandAuthActive = false
         updateOnDemandAuthButtonState()
     }
