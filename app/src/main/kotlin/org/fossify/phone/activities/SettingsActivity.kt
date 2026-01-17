@@ -28,6 +28,7 @@ import org.fossify.commons.extensions.*
 import org.fossify.commons.helpers.*
 import org.fossify.commons.models.RadioItem
 import org.fossify.phone.R
+import org.fossify.phone.callerauth.Storage
 import org.fossify.phone.databinding.ActivitySettingsBinding
 import org.fossify.phone.dialogs.ExportCallHistoryDialog
 import org.fossify.phone.dialogs.ManageVisibleTabsDialog
@@ -174,6 +175,7 @@ class SettingsActivity : SimpleActivity() {
         setupManageBlockedNumbers()
         setupManageSpeedDial()
         setupDiaProtocolToggle()
+        setupDiaPeerSessionCache()
         setupAutoAnswer()
         setupEnrollment()
         setupDiaResetResults()
@@ -216,6 +218,21 @@ class SettingsActivity : SimpleActivity() {
             settingsDiaProtocolHolder.setOnClickListener {
                 settingsDiaProtocol.toggle()
                 config.diaProtocolEnabled = settingsDiaProtocol.isChecked
+            }
+        }
+    }
+
+    private fun setupDiaPeerSessionCache() {
+        binding.apply {
+            settingsDiaPeerSessionCache.isChecked = Storage.isPeerSessionCacheEnabled()
+            settingsDiaPeerSessionCacheHolder.setOnClickListener {
+                settingsDiaPeerSessionCache.toggle()
+                val enabled = settingsDiaPeerSessionCache.isChecked
+                Storage.setPeerSessionCacheEnabled(enabled)
+                if (!enabled) {
+                    Storage.clearAllPeerSessions()
+                    toast("Peer session cache cleared")
+                }
             }
         }
     }

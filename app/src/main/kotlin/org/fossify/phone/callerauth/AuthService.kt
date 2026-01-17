@@ -44,6 +44,10 @@ object AuthService {
     @Volatile private var currentCallState: CallState? = null
     @Volatile private var oobController: OobController? = null
 
+    // Per-call mode/state
+    @Volatile private var ruaOnlyMode: Boolean = false
+    @Volatile private var currentPeerKey: String? = null
+
     // RUA completion gate for ODA
     @Volatile private var ruaComplete: Boolean = false
 
@@ -113,11 +117,61 @@ object AuthService {
                     return@launch
                 }
 
+                val peerKey = normalizePhone(recipient)
+                currentPeerKey = peerKey
+                val cacheEnabled = Storage.isPeerSessionCacheEnabled()
+                val cachedSession = if (cacheEnabled) Storage.loadPeerSession(peerKey) else null
+
                 // Create call state for outgoing call
                 val callState = CallState.create(config, recipient, outgoing = true)
                 currentCallState = callState
 
                 resetSessionState()
+
+                if (cachedSession != null) {
+                    ruaOnlyMode = true
+                    Log.d(TAG, "Using cached peer session ($peerKey) - running RUA-only")
+
+                    callState.applyPeerSession(cachedSession)
+
+                    val ruaTopic = callState.ruaDeriveTopic()
+                    val ticket = callState.ticket
+                    val senderID = callState.senderId
+
+                    // Transition to RUA so currentTopic matches the topic we'll subscribe to.
+                    callState.transitionToRua()
+
+                    // Store callbacks
+                    onReadyToCallCallback = onReadyToCall
+                    protocolCompleteCallback = onProtocolComplete
+
+                    val oob = OobController(
+                        relayHost = Storage.getEffectiveRsHost(),
+                        relayPort = Storage.getEffectiveRsPort(),
+                        initialTopic = ruaTopic,
+                        ticket = ticket,
+                        senderID = senderID,
+                        scope = serviceScope,
+                        useTls = false,
+                        heartbeatProvider = { callState.createHeartbeatMessage() }
+                    )
+
+                    oob.start { payload: ByteArray -> handleOobMessage(payload) }
+                    oobController = oob
+
+                    val ruaRequest = callState.ruaRequest()
+                    oob.send(ruaRequest)
+                    Log.d(TAG, "Sent RUA_REQUEST (${ruaRequest.size} bytes)")
+
+                    withContext(Dispatchers.Main) {
+                        onReadyToCallCallback?.invoke()
+                        onReadyToCallCallback = null
+                    }
+
+                    startProtocolTimeout()
+                    return@launch
+                }
+                ruaOnlyMode = false
                 
                 // Initialize AKE (generates DH keys, computes AKE topic)
                 callState.akeInit()
@@ -209,6 +263,11 @@ object AuthService {
                     withContext(Dispatchers.Main) { onProtocolComplete(false, null) }
                     return@launch
                 }
+
+                val peerKey = normalizePhone(callerNumber)
+                currentPeerKey = peerKey
+                val cacheEnabled = Storage.isPeerSessionCacheEnabled()
+                val cachedSession = if (cacheEnabled) Storage.loadPeerSession(peerKey) else null
                 
                 Log.d(TAG, "Caller: $callerNumber")
                 
@@ -217,6 +276,43 @@ object AuthService {
                 currentCallState = callState
 
                 resetSessionState()
+
+                if (cachedSession != null) {
+                    ruaOnlyMode = true
+                    Log.d(TAG, "Using cached peer session ($peerKey) - running RUA-only")
+
+                    callState.applyPeerSession(cachedSession)
+
+                    val ruaTopic = callState.ruaDeriveTopic()
+                    val ticket = callState.ticket
+                    val senderID = callState.senderId
+
+                    protocolCompleteCallback = onProtocolComplete
+
+                    // Transition to RUA so currentTopic matches the topic we'll subscribe to.
+                    callState.transitionToRua()
+
+                    val oob = OobController(
+                        relayHost = Storage.getEffectiveRsHost(),
+                        relayPort = Storage.getEffectiveRsPort(),
+                        initialTopic = ruaTopic,
+                        ticket = ticket,
+                        senderID = senderID,
+                        scope = serviceScope,
+                        useTls = false,
+                        heartbeatProvider = { callState.createHeartbeatMessage() }
+                    )
+
+                    oob.start { payload: ByteArray -> handleOobMessage(payload) }
+                    oobController = oob
+
+                    callState.ruaInit()
+                    Log.d(TAG, "Subscribed to RUA topic, waiting for RUA_REQUEST...")
+
+                    startProtocolTimeout()
+                    return@launch
+                }
+                ruaOnlyMode = false
                 
                 // Initialize AKE (generates DH keys, computes AKE topic)
                 callState.akeInit()
@@ -347,6 +443,14 @@ object AuthService {
      * Handles messages for the caller (Alice).
      */
     private suspend fun handleCallerMessage(callState: CallState, msgType: Int, rawData: ByteArray) {
+        if (ruaOnlyMode) {
+            when (msgType) {
+                LibDia.MSG_RUA_RESPONSE -> handleCallerRuaResponse(callState, rawData)
+                else -> Log.w(TAG, "Caller (RUA-only) received unexpected message type: $msgType")
+            }
+            return
+        }
+
         when (msgType) {
             LibDia.MSG_AKE_RESPONSE -> handleCallerAkeResponse(callState, rawData)
             LibDia.MSG_RUA_RESPONSE -> handleCallerRuaResponse(callState, rawData)
@@ -407,6 +511,16 @@ object AuthService {
             
             // Finalize RUA
             callState.ruaFinalize(rawData)
+
+            // Persist updated per-peer session state (if enabled)
+            val peerKey = currentPeerKey
+            if (peerKey != null && Storage.isPeerSessionCacheEnabled()) {
+                try {
+                    Storage.savePeerSession(peerKey, callState.exportPeerSession())
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to persist peer session: ${e.message}")
+                }
+            }
             
             // Get verified remote party
             val remoteParty = callState.remoteParty
@@ -439,6 +553,14 @@ object AuthService {
      * Handles messages for the recipient (Bob).
      */
     private suspend fun handleRecipientMessage(callState: CallState, msgType: Int, rawData: ByteArray) {
+        if (ruaOnlyMode) {
+            when (msgType) {
+                LibDia.MSG_RUA_REQUEST -> handleRecipientRuaRequest(callState, rawData)
+                else -> Log.w(TAG, "Recipient (RUA-only) received unexpected message type: $msgType")
+            }
+            return
+        }
+
         when (msgType) {
             LibDia.MSG_AKE_REQUEST -> handleRecipientAkeRequest(callState, rawData)
             LibDia.MSG_AKE_COMPLETE -> handleRecipientAkeComplete(callState, rawData)
@@ -510,6 +632,16 @@ object AuthService {
             val response = callState.ruaResponse(rawData)
             oobController?.send(response)
             Log.d(TAG, "Sent RUA_RESPONSE (${response.size} bytes)")
+
+            // Persist updated per-peer session state (if enabled)
+            val peerKey = currentPeerKey
+            if (peerKey != null && Storage.isPeerSessionCacheEnabled()) {
+                try {
+                    Storage.savePeerSession(peerKey, callState.exportPeerSession())
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to persist peer session: ${e.message}")
+                }
+            }
             
             // Get verified remote party
             val remoteParty = callState.remoteParty
@@ -684,6 +816,7 @@ object AuthService {
 
     private fun resetSessionState() {
         ruaComplete = false
+        ruaOnlyMode = false
         odaInFlight.set(false)
         odaTimeoutJob?.cancel()
         odaTimeoutJob = null
@@ -718,6 +851,8 @@ object AuthService {
             odaInFlight.set(false)
             clearOdaCallbacks()
             ruaComplete = false
+            ruaOnlyMode = false
+            currentPeerKey = null
 
             oobController?.stopHeartbeat()
             oobController?.close()
@@ -746,6 +881,8 @@ object AuthService {
             odaInFlight.set(false)
             clearOdaCallbacks()
             ruaComplete = false
+            ruaOnlyMode = false
+            currentPeerKey = null
             
             // Send BYE message before closing
             try {
@@ -774,4 +911,6 @@ object AuthService {
             onReadyToCallCallback = null
         }
     }
+
+    private fun normalizePhone(phone: String): String = phone.filter { it.isDigit() }
 }
