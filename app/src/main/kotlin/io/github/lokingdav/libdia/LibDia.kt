@@ -24,6 +24,13 @@ object LibDia {
     const val MSG_ODA_REQUEST = 8
     const val MSG_ODA_RESPONSE = 9
 
+    // ===================== Benchmarks =====================
+    /** Run protocol-operation benchmarks and return results as CSV. */
+    external fun benchProtocolCsv(samples: Int, itersOverride: Int): String
+
+    /** Run role-aggregated protocol benchmarks and return results as CSV. */
+    external fun benchProtocolRoleCsv(samples: Int, itersOverride: Int): String
+
     // ===================== Config =====================
     /** Parse a Config from environment variable format string. Returns native handle. */
     external fun configFromEnv(envContent: String): Long
@@ -70,6 +77,12 @@ object LibDia {
 
     /** Transition to RUA topic (updates current topic). */
     external fun callStateTransitionToRua(handle: Long)
+
+    /** Export per-peer session state (opaque bytes) for persistence. */
+    external fun callStateExportPeerSession(handle: Long): ByteArray
+
+    /** Apply previously exported peer session state. */
+    external fun callStateApplyPeerSession(handle: Long, data: ByteArray)
 
     // ===================== AKE Protocol =====================
     /** Initialize AKE state (generates DH keys, computes topic). */
@@ -322,6 +335,12 @@ class CallState private constructor(internal val handle: Long) : AutoCloseable {
 
     /** Transition to RUA topic (updates current topic). */
     fun transitionToRua() = LibDia.callStateTransitionToRua(handle)
+
+    /** Export per-peer session state (opaque bytes) for persistence. */
+    fun exportPeerSession(): ByteArray = LibDia.callStateExportPeerSession(handle)
+
+    /** Apply previously exported peer session state. */
+    fun applyPeerSession(data: ByteArray) = LibDia.callStateApplyPeerSession(handle, data)
 
     // ===================== AKE Protocol =====================
 

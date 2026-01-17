@@ -85,6 +85,15 @@ object MetricsRecorder {
         }
     }
 
+    /**
+     * Directory where DIA CSV artifacts are written.
+     * This is the same location used for [denseid_results.csv].
+     */
+    fun resultsDir(context: Context): File {
+        val appCtx = context.applicationContext
+        return appCtx.getExternalFilesDir(null) ?: appCtx.filesDir
+    }
+
     fun markOutgoingDial(peerPhone: String, protocolEnabled: Boolean) {
         val nowUnixMs = System.currentTimeMillis()
         val nowElapsedMs = SystemClock.elapsedRealtime()
@@ -253,10 +262,7 @@ object MetricsRecorder {
         }
     }
 
-    private fun resultsFile(context: Context): File {
-        val dir = context.getExternalFilesDir(null) ?: context.filesDir
-        return File(dir, FILE_NAME)
-    }
+    private fun resultsFile(context: Context): File = File(resultsDir(context), FILE_NAME)
 
     private fun ensureHeader(file: File) {
         if (file.exists() && file.length() > 0) {

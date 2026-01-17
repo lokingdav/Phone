@@ -7,8 +7,16 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.Menu
+import android.widget.FrameLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.lifecycleScope
+import io.github.lokingdav.libdia.LibDia
+import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -83,7 +91,7 @@ class SettingsActivity : SimpleActivity() {
             val density = resources.displayMetrics.density
             val titlePadding = (20 * density).toInt()
             val titleView = TextView(this).apply {
-                text = "Reset Results"
+                text = "Reset Call Results"
                 setTextColor(getColor(R.color.md_red_700))
                 setTypeface(typeface, Typeface.BOLD)
                 textSize = 20f
@@ -102,6 +110,59 @@ class SettingsActivity : SimpleActivity() {
         }
     }
 
+    private fun setupDiaBenchmarks() {
+        binding.settingsDiaRunBenchmarksHolder.setOnClickListener {
+            // Simple indeterminate loading UI (benchmarks can take minutes)
+            val density = resources.displayMetrics.density
+            val padding = (24 * density).toInt()
+            val progressContainer = FrameLayout(this).apply {
+                setPadding(padding, padding, padding, padding)
+                addView(ProgressBar(this@SettingsActivity).apply {
+                    isIndeterminate = true
+                })
+            }
+
+            val loadingDialog = androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(getString(R.string.run_benchmarks))
+                .setMessage("Running benchmarks… this may take a few minutes.")
+                .setView(progressContainer)
+                .setCancelable(false)
+                .create()
+
+            loadingDialog.show()
+            binding.settingsDiaRunBenchmarksHolder.isEnabled = false
+
+            lifecycleScope.launch {
+                try {
+                    val dir = MetricsRecorder.resultsDir(this@SettingsActivity)
+                    val primitivesFile = File(dir, "primitives.csv")
+                    val rolesFile = File(dir, "roles.csv")
+
+                    val (primitivesCsv, rolesCsv) = withContext(Dispatchers.Default) {
+                        val primitives = LibDia.benchProtocolCsv(1, 1)
+                        val roles = LibDia.benchProtocolRoleCsv(1, 1)
+                        primitives to roles
+                    }
+
+                    withContext(Dispatchers.IO) {
+                        primitivesFile.writeText(primitivesCsv)
+                        rolesFile.writeText(rolesCsv)
+                    }
+
+                    toast("Saved primitives.csv and roles.csv to ${dir.absolutePath}")
+                } catch (e: Exception) {
+                    val msg = e.message ?: "unknown error"
+                    toast("Benchmark failed: $msg")
+                } finally {
+                    binding.settingsDiaRunBenchmarksHolder.isEnabled = true
+                    if (loadingDialog.isShowing) {
+                        loadingDialog.dismiss()
+                    }
+                }
+            }
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         setupToolbar(binding.settingsToolbar, NavigationIcon.Arrow)
@@ -116,6 +177,7 @@ class SettingsActivity : SimpleActivity() {
         setupAutoAnswer()
         setupEnrollment()
         setupDiaResetResults()
+        setupDiaBenchmarks()
         setupChangeDateTimeFormat()
         setupFontSize()
         setupManageShownTabs()

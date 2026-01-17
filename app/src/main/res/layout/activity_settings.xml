@@ -82,6 +82,22 @@
             </RelativeLayout>
 
             <RelativeLayout
+                android:id="@+id/settings_dia_run_benchmarks_holder"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="?attr/selectableItemBackground"
+                android:padding="@dimen/activity_margin">
+
+                <org.fossify.commons.views.MyTextView
+                    android:id="@+id/settings_dia_run_benchmarks"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_centerVertical="true"
+                    android:text="@string/run_benchmarks" />
+
+            </RelativeLayout>
+
+            <RelativeLayout
                 android:id="@+id/settings_dia_reset_results_holder"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -93,7 +109,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_centerVertical="true"
-                    android:text="Reset Results" />
+                    android:text="Reset Call Results" />
 
             </RelativeLayout>
 
