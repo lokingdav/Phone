@@ -140,8 +140,8 @@ class SettingsActivity : SimpleActivity() {
                     val rolesFile = File(dir, "roles.csv")
 
                     val (primitivesCsv, rolesCsv) = withContext(Dispatchers.Default) {
-                        val primitives = LibDia.benchProtocolCsv(1, 1)
-                        val roles = LibDia.benchProtocolRoleCsv(1, 1)
+                        val primitives = LibDia.benchProtocolCsv(10, 0)
+                        val roles = LibDia.benchProtocolRoleCsv(10, 0)
                         primitives to roles
                     }
 
