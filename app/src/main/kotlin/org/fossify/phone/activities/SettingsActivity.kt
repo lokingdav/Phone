@@ -136,21 +136,17 @@ class SettingsActivity : SimpleActivity() {
             lifecycleScope.launch {
                 try {
                     val dir = MetricsRecorder.resultsDir(this@SettingsActivity)
-                    val primitivesFile = File(dir, "primitives.csv")
-                    val rolesFile = File(dir, "roles.csv")
+                    val rolesFile = File(dir, "roles-mb.csv")
 
-                    val (primitivesCsv, rolesCsv) = withContext(Dispatchers.Default) {
-                        val primitives = LibDia.benchProtocolCsv(10, 0)
-                        val roles = LibDia.benchProtocolRoleCsv(10, 0)
-                        primitives to roles
+                    val rolesCsv = withContext(Dispatchers.Default) {
+                        LibDia.benchProtocolRoleCsv(15, 0)
                     }
 
                     withContext(Dispatchers.IO) {
-                        primitivesFile.writeText(primitivesCsv)
                         rolesFile.writeText(rolesCsv)
                     }
 
-                    toast("Saved primitives.csv and roles.csv to ${dir.absolutePath}")
+                    toast("Saved roles.csv to ${dir.absolutePath}")
                 } catch (e: Exception) {
                     val msg = e.message ?: "unknown error"
                     toast("Benchmark failed: $msg")
