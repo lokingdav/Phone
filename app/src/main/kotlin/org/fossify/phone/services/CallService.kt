@@ -35,8 +35,7 @@ class CallService : InCallService() {
             super.onStateChanged(call, state)
             if (state == Call.STATE_DISCONNECTED || state == Call.STATE_DISCONNECTING) {
                 callNotificationManager.cancelNotification()
-            } else if (!CallManager.isCallPendingAuth(call)) {
-                // Only show notification if call is not pending authentication
+            } else {
                 callNotificationManager.setupNotification()
             }
         }
@@ -48,12 +47,10 @@ class CallService : InCallService() {
         override fun onPrimaryCallChanged(call: Call) {}
         
         override fun onCallAuthCompleted(call: Call, success: Boolean) {
-            android.util.Log.d("CallService", "Auth completed for call, showing UI")
-            // Now that authentication is complete, either auto-answer or show UI.
+            android.util.Log.d("CallService", "Auth completed for call")
+            // Keep behavior: auto-answer happens only after DIA auth completes.
             if (shouldAutoAnswer(call)) {
                 autoAnswer(call)
-            } else {
-                showCallUI(call)
             }
         }
     }
@@ -64,13 +61,6 @@ class CallService : InCallService() {
         CallManager.onCallAdded(call)
         CallManager.addListener(callManagerListener)
         call.registerCallback(callListener)
-
-        // If incoming call is pending authentication, don't show UI yet
-        // The UI will be shown when onCallAuthCompleted is called
-        if (CallManager.isCallPendingAuth(call)) {
-            android.util.Log.d("CallService", "Incoming call pending auth, deferring UI")
-            return
-        }
 
         if (shouldAutoAnswer(call)) {
             autoAnswer(call)

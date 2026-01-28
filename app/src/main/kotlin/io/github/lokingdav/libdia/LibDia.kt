@@ -154,6 +154,17 @@ object LibDia {
     /** Create a Heartbeat message. */
     external fun messageCreateHeartbeat(callStateHandle: Long): ByteArray
 
+    /** Create a MAC for a message: K = H(token), MAC = HMAC(K, data). */
+    external fun messageCreateMac(token: ByteArray, data: ByteArray): ByteArray
+
+    /** Verify a message MAC using a VOPRF private key and token preimage. */
+    external fun messageVerifyMac(
+        atPrivateKey: ByteArray,
+        tokenPreimage: ByteArray,
+        data: ByteArray,
+        mac: ByteArray
+    ): Boolean
+
     // ===================== DR Messaging =====================
     /** Encrypt a message using Double Ratchet. */
     external fun drEncrypt(callStateHandle: Long, plaintext: ByteArray): ByteArray
