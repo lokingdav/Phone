@@ -268,6 +268,9 @@ object AuthService {
                 currentPeerKey = peerKey
                 val cacheEnabled = Storage.isPeerSessionCacheEnabled()
                 val cachedSession = if (cacheEnabled) Storage.loadPeerSession(peerKey) else null
+
+                // Bound metric to actual DIA protocol runtime (begin -> completion).
+                MetricsRecorder.onIncomingDiaBegin(call, protocolEnabled = true, cacheEnabled = cacheEnabled)
                 
                 Log.d(TAG, "Caller: $callerNumber")
                 

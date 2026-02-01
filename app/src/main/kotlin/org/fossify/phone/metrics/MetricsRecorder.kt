@@ -20,7 +20,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
 object MetricsRecorder {
     private const val TAG = "DIA-Metrics"
     private const val FILE_NAME = "denseid_results.csv"
-    private const val INCOMING_DIA_FILE_NAME = "denseid_incoming_dia_latency.csv"
+    private const val INCOMING_DIA_DURATION_FILE_NAME = "denseid_incoming_dia_duration.csv"
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val fileLock = Any()
@@ -46,7 +46,7 @@ object MetricsRecorder {
         "error"
     )
 
-    private val incomingDiaHeader = listOf(
+    private val incomingDiaDurationHeader = listOf(
         "attempt_id",
         "call_id",
         "self_phone",
@@ -54,9 +54,9 @@ object MetricsRecorder {
         "peer_uri",
         "protocol_enabled",
         "cache_enabled",
-        "incoming_signal_unix_ms",
+        "dia_begin_unix_ms",
         "dia_complete_unix_ms",
-        "dia_latency_ms",
+        "dia_duration_ms",
         "outcome",
         "error"
     )
@@ -78,20 +78,20 @@ object MetricsRecorder {
         @Volatile var odaRequestedElapsedMs: Long = 0L
     }
 
-    data class IncomingDiaAttempt(
+    data class IncomingDiaDurationAttempt(
         val attemptId: String,
         val callId: String,
         val peerPhone: String,
         val peerUri: String,
         val protocolEnabled: Boolean,
         val cacheEnabled: Boolean,
-        val signalAtUnixMs: Long,
-        val signalAtElapsedMs: Long,
+        val diaBeginAtUnixMs: Long,
+        val diaBeginAtElapsedMs: Long,
     )
 
     private val pendingOutgoingByPeer = ConcurrentHashMap<String, ConcurrentLinkedQueue<AttemptContext>>()
     private val activeByCallKey = ConcurrentHashMap<Int, AttemptContext>()
-    private val incomingDiaByCallKey = ConcurrentHashMap<Int, IncomingDiaAttempt>()
+    private val incomingDiaDurationByCallKey = ConcurrentHashMap<Int, IncomingDiaDurationAttempt>()
 
     fun init(context: Context) {
         appContext = context.applicationContext
@@ -100,12 +100,19 @@ object MetricsRecorder {
     fun clearResults(context: Context): Boolean {
         synchronized(fileLock) {
             return try {
-                val file = resultsFile(context.applicationContext)
-                if (file.exists()) {
-                    file.delete()
-                } else {
-                    true
+                val appCtx = context.applicationContext
+
+                val resultsOk = run {
+                    val file = resultsFile(appCtx)
+                    !file.exists() || file.delete()
                 }
+
+                val incomingDiaDurationOk = run {
+                    val file = incomingDiaDurationFile(appCtx)
+                    !file.exists() || file.delete()
+                }
+
+                resultsOk && incomingDiaDurationOk
             } catch (e: Exception) {
                 Log.w(TAG, "Failed clearing results: ${e.message}", e)
                 false
@@ -209,14 +216,14 @@ object MetricsRecorder {
     fun onCallRemoved(call: Call) {
         val callKey = System.identityHashCode(call)
         activeByCallKey.remove(callKey)
-        incomingDiaByCallKey.remove(callKey)
+        incomingDiaDurationByCallKey.remove(callKey)
     }
 
     /**
-     * Incoming DIA latency: marks the moment the incoming call signal reaches the app.
-     * Pair with [onIncomingDiaComplete] to compute the delay until DIA completes (through RUA).
+     * Incoming DIA duration: marks the moment DIA begins.
+     * Pair with [onIncomingDiaEnd] to compute DIA duration bounded to the protocol run.
      */
-    fun onIncomingDiaSignal(call: Call, protocolEnabled: Boolean, cacheEnabled: Boolean) {
+    fun onIncomingDiaBegin(call: Call, protocolEnabled: Boolean, cacheEnabled: Boolean) {
         val context = appContext ?: return
         val callKey = System.identityHashCode(call)
 
@@ -226,39 +233,40 @@ object MetricsRecorder {
         val peerUri = call.details.handle?.toString().orEmpty()
         val peerPhone = call.details.handle?.schemeSpecificPart.orEmpty()
 
-        val attempt = IncomingDiaAttempt(
+        val attempt = IncomingDiaDurationAttempt(
             attemptId = UUID.randomUUID().toString(),
             callId = callKey.toString(),
             peerPhone = peerPhone,
             peerUri = peerUri,
             protocolEnabled = protocolEnabled,
             cacheEnabled = cacheEnabled,
-            signalAtUnixMs = nowUnixMs,
-            signalAtElapsedMs = nowElapsedMs,
+            diaBeginAtUnixMs = nowUnixMs,
+            diaBeginAtElapsedMs = nowElapsedMs,
         )
 
-        incomingDiaByCallKey[callKey] = attempt
+        incomingDiaDurationByCallKey[callKey] = attempt
     }
 
     /**
-     * Incoming DIA latency: records completion time and emits a CSV row.
+     * Incoming DIA duration: records completion time and emits a CSV row.
      */
-    fun onIncomingDiaComplete(call: Call, success: Boolean, error: String = "") {
-        val attempt = incomingDiaByCallKey.remove(System.identityHashCode(call)) ?: return
+    fun onIncomingDiaEnd(call: Call, success: Boolean, error: String = "") {
+        val attempt = incomingDiaDurationByCallKey.remove(System.identityHashCode(call)) ?: return
 
         val doneAtUnixMs = System.currentTimeMillis()
         val doneElapsedMs = SystemClock.elapsedRealtime()
-        val latencyMs = if (attempt.signalAtElapsedMs > 0L) doneElapsedMs - attempt.signalAtElapsedMs else 0L
+        val durationMs = if (attempt.diaBeginAtElapsedMs > 0L) doneElapsedMs - attempt.diaBeginAtElapsedMs else 0L
 
         val outcome = if (success) "verified" else "failed"
-        appendIncomingDiaRecord(
+        appendIncomingDiaDurationRecord(
             attempt = attempt,
             doneAtUnixMs = doneAtUnixMs,
-            latencyMs = latencyMs,
+            durationMs = durationMs,
             outcome = outcome,
             error = error
         )
     }
+
 
     fun onOdaRequested(call: Call) {
         val callKey = System.identityHashCode(call)
@@ -341,7 +349,7 @@ object MetricsRecorder {
 
     private fun resultsFile(context: Context): File = File(resultsDir(context), FILE_NAME)
 
-    private fun incomingDiaFile(context: Context): File = File(resultsDir(context), INCOMING_DIA_FILE_NAME)
+    private fun incomingDiaDurationFile(context: Context): File = File(resultsDir(context), INCOMING_DIA_DURATION_FILE_NAME)
 
     private fun ensureHeader(file: File) {
         if (file.exists() && file.length() > 0) {
@@ -354,21 +362,21 @@ object MetricsRecorder {
         }
     }
 
-    private fun ensureIncomingDiaHeader(file: File) {
+    private fun ensureIncomingDiaDurationHeader(file: File) {
         if (file.exists() && file.length() > 0) {
             return
         }
         file.parentFile?.mkdirs()
         FileWriter(file, true).use { fw ->
-            fw.append(incomingDiaHeader.joinToString(",") { escapeCsv(it) })
+            fw.append(incomingDiaDurationHeader.joinToString(",") { escapeCsv(it) })
             fw.append("\n")
         }
     }
 
-    private fun appendIncomingDiaRecord(
-        attempt: IncomingDiaAttempt,
+    private fun appendIncomingDiaDurationRecord(
+        attempt: IncomingDiaDurationAttempt,
         doneAtUnixMs: Long,
-        latencyMs: Long,
+        durationMs: Long,
         outcome: String,
         error: String,
     ) {
@@ -384,23 +392,23 @@ object MetricsRecorder {
                 attempt.peerUri,
                 attempt.protocolEnabled.toString(),
                 attempt.cacheEnabled.toString(),
-                attempt.signalAtUnixMs.toString(),
+                attempt.diaBeginAtUnixMs.toString(),
                 doneAtUnixMs.toString(),
-                latencyMs.toString(),
+                durationMs.toString(),
                 outcome,
                 error
             )
 
             synchronized(fileLock) {
                 try {
-                    val file = incomingDiaFile(context)
-                    ensureIncomingDiaHeader(file)
+                    val file = incomingDiaDurationFile(context)
+                    ensureIncomingDiaDurationHeader(file)
                     FileWriter(file, true).use { fw ->
                         fw.append(rec.joinToString(",") { escapeCsv(it) })
                         fw.append("\n")
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "Incoming DIA CSV write failed: ${e.message}", e)
+                    Log.w(TAG, "Incoming DIA duration CSV write failed: ${e.message}", e)
                 }
             }
         }

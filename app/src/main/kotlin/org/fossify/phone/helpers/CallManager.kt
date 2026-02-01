@@ -73,13 +73,11 @@ class CallManager {
                 // Start authentication protocol for incoming calls if enrolled
                 val protocolEnabledForAttempt = App.diaConfig != null && (inCallService?.applicationContext?.config?.diaProtocolEnabled == true)
                 if (protocolEnabledForAttempt) {
-                    MetricsRecorder.onIncomingDiaSignal(call, protocolEnabled = true, cacheEnabled = org.fossify.phone.callerauth.Storage.isPeerSessionCacheEnabled())
-
                     // Mark call as pending auth
                     callsPendingAuth.add(call)
                     
                     AuthService.handleIncomingCall(call) { success, remoteParty ->
-                        MetricsRecorder.onIncomingDiaComplete(
+                        MetricsRecorder.onIncomingDiaEnd(
                             call,
                             success = success && remoteParty != null,
                             error = if (success && remoteParty != null) "" else "not_verified"

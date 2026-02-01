@@ -101,7 +101,7 @@ class SettingsActivity : SimpleActivity() {
 
             androidx.appcompat.app.AlertDialog.Builder(this)
                 .setCustomTitle(titleView)
-                .setMessage("Delete the results CSV file?")
+                .setMessage("Delete the results CSV files?")
                 .setPositiveButton(android.R.string.ok) { _, _ ->
                     val ok = MetricsRecorder.clearResults(this)
                     toast(if (ok) "Results cleared" else "Failed to clear results")
