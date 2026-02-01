@@ -46,6 +46,9 @@ class RelaySession(
     // Outbound request queue (buffered channel for non-blocking sends)
     private val sendQueue = Channel<Relay.RelayRequest>(capacity = 256)
 
+    // Signals when connection is established and initial SUBSCRIBE has been sent
+    private val connectedDeferred = CompletableDeferred<Unit>()
+
     /**
      * Starts the session with the given message handler.
      * Launches tunnel loop and begins receiving messages.
@@ -62,6 +65,14 @@ class RelaySession(
         tunnelJob = scope.launch(Dispatchers.IO) {
             tunnelLoop()
         }
+    }
+
+    /**
+     * Suspends until the connection is established and initial SUBSCRIBE has been sent.
+     * Use this to ensure messages are ready to be received before proceeding.
+     */
+    suspend fun awaitConnected() {
+        connectedDeferred.await()
     }
 
     /**
@@ -176,10 +187,13 @@ class RelaySession(
         
         while (!closed.get() && isActive) {
             try {
+                val t0 = System.currentTimeMillis()
                 Log.d(TAG, "Opening tunnel to relay server...")
                 
                 // Create the bidirectional stream
                 val requestFlow = flow {
+                    Log.d(TAG, "TIMING: flow started (gRPC connected) at +${System.currentTimeMillis() - t0}ms")
+                    
                     // First, send SUBSCRIBE to current topic (with replay)
                     val topic = topicMutex.withLock { currentTopic }
 
@@ -196,7 +210,10 @@ class RelaySession(
                         .build()
                     
                     emit(subscribeRequest)
-                    Log.d(TAG, "Sent initial SUBSCRIBE to topic: $topic")
+                    Log.d(TAG, "TIMING: SUBSCRIBE emitted at +${System.currentTimeMillis() - t0}ms")
+                    
+                    // Signal that we're connected and initial SUBSCRIBE has been sent
+                    connectedDeferred.complete(Unit)
                     
                     // Then pump queued requests
                     sendQueue.receiveAsFlow().collect { emit(it) }

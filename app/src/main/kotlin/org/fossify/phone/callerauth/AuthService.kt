@@ -168,6 +168,10 @@ object AuthService {
                     oob.send(ruaRequest)
                     Log.d(TAG, "Sent RUA_REQUEST (${ruaRequest.size} bytes)")
 
+                    // Wait for relay connection and message to be sent before placing call
+                    // This ensures the recipient gets RUA_REQUEST via replay when they subscribe
+                    oob.awaitConnected()
+
                     withContext(Dispatchers.Main) {
                         onReadyToCallCallback?.invoke()
                         onReadyToCallCallback = null
@@ -213,12 +217,19 @@ object AuthService {
                 oob.send(akeRequest)
                 Log.d(TAG, "Sent AKE_REQUEST (${akeRequest.size} bytes)")
                 
+                // Wait for relay connection and message to be sent before placing call
+                // This ensures the recipient gets AKE_REQUEST via replay when they subscribe
+                oob.awaitConnected()
+                
                 // Signal that call can now be placed
                 withContext(Dispatchers.Main) {
                     onReadyToCallCallback?.invoke()
                     onReadyToCallCallback = null
                 }
                 Log.d(TAG, "Call can now be placed, waiting for AKE_RESPONSE...")
+                
+                // Set timeout for protocol completion
+                startProtocolTimeout()
                 
                 // Set timeout for protocol completion
                 startProtocolTimeout()
@@ -285,7 +296,9 @@ object AuthService {
                 Log.d(TAG, "Caller: $callerNumber")
                 
                 // Create call state for incoming call
+                var t0 = System.currentTimeMillis()
                 val callState = CallState.create(config, callerNumber, outgoing = false)
+                Log.d(TAG, "TIMING: CallState.create took ${System.currentTimeMillis() - t0}ms")
                 currentCallState = callState
 
                 resetSessionState()
@@ -294,17 +307,29 @@ object AuthService {
                     ruaOnlyMode = true
                     Log.d(TAG, "Using cached peer session ($peerKey) - running RUA-only")
 
+                    t0 = System.currentTimeMillis()
                     callState.applyPeerSession(cachedSession)
+                    Log.d(TAG, "TIMING: applyPeerSession took ${System.currentTimeMillis() - t0}ms")
 
+                    t0 = System.currentTimeMillis()
                     val ruaTopic = callState.ruaDeriveTopic()
+                    Log.d(TAG, "TIMING: ruaDeriveTopic took ${System.currentTimeMillis() - t0}ms")
+                    
                     val ticket = callState.ticket
                     val senderID = callState.senderId
 
                     protocolCompleteCallback = onProtocolComplete
 
                     // Transition to RUA so currentTopic matches the topic we'll subscribe to.
-                    MetricsRecorder.onIncomingRuaBegin(call)
+                    t0 = System.currentTimeMillis()
                     callState.transitionToRua()
+                    Log.d(TAG, "TIMING: transitionToRua took ${System.currentTimeMillis() - t0}ms")
+
+                    // Initialize RUA state BEFORE connecting so we're ready to handle
+                    // RUA_REQUEST as soon as it arrives via replay
+                    t0 = System.currentTimeMillis()
+                    callState.ruaInit()
+                    Log.d(TAG, "TIMING: ruaInit took ${System.currentTimeMillis() - t0}ms")
 
                     val oob = OobController(
                         relayHost = Storage.getEffectiveRsHost(),
@@ -317,10 +342,16 @@ object AuthService {
                         heartbeatProvider = { callState.createHeartbeatMessage() }
                     )
 
+                    t0 = System.currentTimeMillis()
                     oob.start { payload: ByteArray -> handleOobMessage(payload) }
                     oobController = oob
 
-                    callState.ruaInit()
+                    // Wait for relay connection before starting RUA timer
+                    // (so we measure RUA protocol time, not connection setup)
+                    oob.awaitConnected()
+                    Log.d(TAG, "TIMING: oob.start+awaitConnected took ${System.currentTimeMillis() - t0}ms")
+
+                    MetricsRecorder.onIncomingRuaBegin(call)
                     Log.d(TAG, "Subscribed to RUA topic, waiting for RUA_REQUEST...")
 
                     startProtocolTimeout()
@@ -329,7 +360,6 @@ object AuthService {
                 ruaOnlyMode = false
                 
                 // Initialize AKE (generates DH keys, computes AKE topic)
-                MetricsRecorder.onIncomingAkeBegin(call)
                 callState.akeInit()
                 
                 // Get OOB channel parameters
@@ -358,6 +388,11 @@ object AuthService {
                 // Note: Heartbeat will be started after protocol completes
                 oobController = oob
                 
+                // Wait for relay connection before starting AKE timer
+                // (so AKE measures only protocol time, not connection setup)
+                oob.awaitConnected()
+                
+                MetricsRecorder.onIncomingAkeBegin(call)
                 Log.d(TAG, "Subscribed to AKE topic, waiting for AKE_REQUEST...")
                 
                 // Set timeout for protocol completion
@@ -762,9 +797,11 @@ object AuthService {
                 if (odaInFlight.compareAndSet(true, false)) {
                     CallManager.getPrimaryCall()?.let { MetricsRecorder.onOdaCompleted(it, outcome = "oda_timeout", error = "oda timeout") }
                     CallManager.getPrimaryCall()?.let { MetricsRecorder.onIncomingOdaEnd(it, outcome = "oda_timeout", error = "oda timeout") }
+                    val wasAuto = odaInFlightIsAuto
                     odaInFlightIsAuto = false
                     val cb = odaErrorCallback
                     clearOdaCallbacks()
+                    hangupRingingCallAfterAutoOdaIfNeeded(wasAuto, reason = "oda_timeout")
                     withContext(Dispatchers.Main) { cb?.invoke("On-demand auth timed out") }
                 }
             }
@@ -788,9 +825,11 @@ object AuthService {
                     MetricsRecorder.onOdaCompleted(it, outcome = "error", error = e.message ?: "oda request failed")
                     MetricsRecorder.onIncomingOdaEnd(it, outcome = "error", error = e.message ?: "oda request failed")
                 }
+                val wasAuto = odaInFlightIsAuto
                 odaInFlightIsAuto = false
                 val cb = odaErrorCallback
                 clearOdaCallbacks()
+                hangupRingingCallAfterAutoOdaIfNeeded(wasAuto, reason = "oda_request_error")
                 withContext(Dispatchers.Main) { cb?.invoke(e.message ?: "Failed to start on-demand auth") }
             }
         }
@@ -832,9 +871,12 @@ object AuthService {
             odaTimeoutJob?.cancel()
             odaTimeoutJob = null
             odaInFlight.set(false)
+            val wasAuto = odaInFlightIsAuto
             odaInFlightIsAuto = false
             val cb = odaResultCallback
             clearOdaCallbacks()
+
+            hangupRingingCallAfterAutoOdaIfNeeded(wasAuto, reason = "oda_done")
 
             withContext(Dispatchers.Main) {
                 cb?.invoke(verification)
@@ -846,12 +888,26 @@ object AuthService {
             odaInFlight.set(false)
             CallManager.getPrimaryCall()?.let { MetricsRecorder.onOdaCompleted(it, outcome = "error", error = e.message ?: "oda verify failed") }
             CallManager.getPrimaryCall()?.let { MetricsRecorder.onIncomingOdaEnd(it, outcome = "error", error = e.message ?: "oda verify failed") }
+            val wasAuto = odaInFlightIsAuto
             odaInFlightIsAuto = false
             val cb = odaErrorCallback
             clearOdaCallbacks()
+
+            hangupRingingCallAfterAutoOdaIfNeeded(wasAuto, reason = "oda_verify_error")
+
             withContext(Dispatchers.Main) {
                 cb?.invoke(e.message ?: "On-demand auth verification failed")
             }
+        }
+    }
+
+    private fun hangupRingingCallAfterAutoOdaIfNeeded(wasAuto: Boolean, reason: String) {
+        if (!wasAuto) return
+        if (!Storage.isAutoOdaEnabled()) return
+
+        if (CallManager.getState() == Call.STATE_RINGING) {
+            Log.i(TAG, "Auto ODA completed ($reason) - hanging up ringing call")
+            CallManager.reject()
         }
     }
 

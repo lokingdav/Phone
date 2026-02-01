@@ -89,6 +89,14 @@ class OobController(
     }
 
     /**
+     * Suspends until the relay connection is established and initial SUBSCRIBE has been sent.
+     * Use this to ensure the relay is ready before placing the call.
+     */
+    suspend fun awaitConnected() {
+        session.awaitConnected()
+    }
+
+    /**
      * Sends a message to a specific topic.
      */
     suspend fun sendToTopic(topic: String, payload: ByteArray, ticket: ByteArray? = null) {
