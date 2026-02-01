@@ -65,6 +65,21 @@
 
             </RelativeLayout>
 
+            <RelativeLayout
+                android:id="@+id/settings_dia_auto_oda_holder"
+                style="@style/SettingsHolderSwitchStyle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <org.fossify.commons.views.MyMaterialSwitch
+                    android:id="@+id/settings_dia_auto_oda"
+                    style="@style/SettingsSwitchStyle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/auto_oda" />
+
+            </RelativeLayout>
+
                     <RelativeLayout
                     android:id="@+id/settings_auto_answer_holder"
                     style="@style/SettingsHolderSwitchStyle"

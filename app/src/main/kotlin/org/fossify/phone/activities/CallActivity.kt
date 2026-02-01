@@ -849,7 +849,8 @@ class CallActivity : SimpleActivity() {
                 updateOnDemandAuthButtonState()
                 updateState()
                 toast(msg)
-            }
+            },
+            isAuto = false
         )
     }
 

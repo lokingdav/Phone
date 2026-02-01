@@ -36,6 +36,7 @@ object AuthService {
     private const val TAG = "CallAuth"
     private const val PROTOCOL_TIMEOUT_MS = 15_000L
     private const val ODA_TIMEOUT_MS = 15_000L
+    private const val AUTO_ODA_DELAY_MS = 1_000L
 
     // Service-wide background scope for network I/O
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -53,9 +54,13 @@ object AuthService {
 
     // ODA in-flight state (allow multiple ODAs over call lifetime, but only one at a time)
     private val odaInFlight = AtomicBoolean(false)
+    @Volatile private var odaInFlightIsAuto: Boolean = false
     @Volatile private var odaTimeoutJob: Job? = null
     @Volatile private var odaResultCallback: ((OdaVerification) -> Unit)? = null
     @Volatile private var odaErrorCallback: ((String) -> Unit)? = null
+
+    // Auto ODA coordination (best-effort; never blocks or changes core call behavior)
+    @Volatile private var autoOdaScheduledJob: Job? = null
     
     // Callbacks for protocol completion
     @Volatile private var onReadyToCallCallback: (() -> Unit)? = null
@@ -270,7 +275,12 @@ object AuthService {
                 val cachedSession = if (cacheEnabled) Storage.loadPeerSession(peerKey) else null
 
                 // Bound metric to actual DIA protocol runtime (begin -> completion).
-                MetricsRecorder.onIncomingDiaBegin(call, protocolEnabled = true, cacheEnabled = cacheEnabled)
+                MetricsRecorder.onIncomingDiaBegin(
+                    call,
+                    protocolEnabled = true,
+                    cacheEnabled = cacheEnabled,
+                    ruaOnlyMode = cachedSession != null
+                )
                 
                 Log.d(TAG, "Caller: $callerNumber")
                 
@@ -293,6 +303,7 @@ object AuthService {
                     protocolCompleteCallback = onProtocolComplete
 
                     // Transition to RUA so currentTopic matches the topic we'll subscribe to.
+                    MetricsRecorder.onIncomingRuaBegin(call)
                     callState.transitionToRua()
 
                     val oob = OobController(
@@ -318,6 +329,7 @@ object AuthService {
                 ruaOnlyMode = false
                 
                 // Initialize AKE (generates DH keys, computes AKE topic)
+                MetricsRecorder.onIncomingAkeBegin(call)
                 callState.akeInit()
                 
                 // Get OOB channel parameters
@@ -537,6 +549,8 @@ object AuthService {
             oobController?.startHeartbeat()
 
             ruaComplete = true
+
+            scheduleAutoOdaIfEnabled()
             
             // Signal protocol complete
             withContext(Dispatchers.Main) {
@@ -601,6 +615,7 @@ object AuthService {
             
             // Finalize AKE
             callState.akeFinalize(rawData)
+            CallManager.getPrimaryCall()?.let { MetricsRecorder.onIncomingAkeEnd(it) }
             Log.d(TAG, "✓ AKE Complete! Shared key established")
             
             // Derive RUA topic
@@ -608,6 +623,7 @@ object AuthService {
             Log.d(TAG, "RUA topic derived: $ruaTopic")
             
             // Transition to RUA state
+            CallManager.getPrimaryCall()?.let { MetricsRecorder.onIncomingRuaBegin(it) }
             callState.transitionToRua()
             
             // Subscribe to RUA topic (with replay to get RUA_REQUEST)
@@ -636,6 +652,8 @@ object AuthService {
             oobController?.send(response)
             Log.d(TAG, "Sent RUA_RESPONSE (${response.size} bytes)")
 
+            CallManager.getPrimaryCall()?.let { MetricsRecorder.onIncomingRuaEnd(it) }
+
             // Persist updated per-peer session state (if enabled)
             val peerKey = currentPeerKey
             if (peerKey != null && Storage.isPeerSessionCacheEnabled()) {
@@ -658,6 +676,8 @@ object AuthService {
             oobController?.startHeartbeat()
 
             ruaComplete = true
+
+            scheduleAutoOdaIfEnabled()
             
             // Signal protocol complete - phone can ring now!
             withContext(Dispatchers.Main) {
@@ -710,7 +730,8 @@ object AuthService {
     fun requestOnDemandAuthentication(
         attributes: List<String>,
         onResult: (OdaVerification) -> Unit,
-        onError: (String) -> Unit = {}
+        onError: (String) -> Unit = {},
+        isAuto: Boolean = false
     ) {
         serviceScope.launch {
             val callState = currentCallState
@@ -730,6 +751,8 @@ object AuthService {
                 return@launch
             }
 
+            odaInFlightIsAuto = isAuto
+
             odaResultCallback = onResult
             odaErrorCallback = onError
 
@@ -738,6 +761,8 @@ object AuthService {
                 delay(ODA_TIMEOUT_MS)
                 if (odaInFlight.compareAndSet(true, false)) {
                     CallManager.getPrimaryCall()?.let { MetricsRecorder.onOdaCompleted(it, outcome = "oda_timeout", error = "oda timeout") }
+                    CallManager.getPrimaryCall()?.let { MetricsRecorder.onIncomingOdaEnd(it, outcome = "oda_timeout", error = "oda timeout") }
+                    odaInFlightIsAuto = false
                     val cb = odaErrorCallback
                     clearOdaCallbacks()
                     withContext(Dispatchers.Main) { cb?.invoke("On-demand auth timed out") }
@@ -745,8 +770,13 @@ object AuthService {
             }
 
             try {
+                CallManager.getPrimaryCall()?.let {
+                    // ODA duration begins just before request creation (request creation is part of ODA).
+                    MetricsRecorder.onOdaRequested(it)
+                    MetricsRecorder.onIncomingOdaBegin(it, wasAuto = odaInFlightIsAuto)
+                }
+
                 val request = callState.odaRequest(attributes)
-                CallManager.getPrimaryCall()?.let { MetricsRecorder.onOdaRequested(it) }
                 oob.send(request)
                 Log.d(TAG, "Sent ODA_REQUEST (${request.size} bytes) attrs=$attributes")
             } catch (e: Exception) {
@@ -754,7 +784,11 @@ object AuthService {
                 odaTimeoutJob?.cancel()
                 odaTimeoutJob = null
                 odaInFlight.set(false)
-                CallManager.getPrimaryCall()?.let { MetricsRecorder.onOdaCompleted(it, outcome = "error", error = e.message ?: "oda request failed") }
+                CallManager.getPrimaryCall()?.let {
+                    MetricsRecorder.onOdaCompleted(it, outcome = "error", error = e.message ?: "oda request failed")
+                    MetricsRecorder.onIncomingOdaEnd(it, outcome = "error", error = e.message ?: "oda request failed")
+                }
+                odaInFlightIsAuto = false
                 val cb = odaErrorCallback
                 clearOdaCallbacks()
                 withContext(Dispatchers.Main) { cb?.invoke(e.message ?: "Failed to start on-demand auth") }
@@ -793,10 +827,12 @@ object AuthService {
             )
 
             CallManager.getPrimaryCall()?.let { MetricsRecorder.onOdaCompleted(it, outcome = "oda_done") }
+            CallManager.getPrimaryCall()?.let { MetricsRecorder.onIncomingOdaEnd(it, outcome = "oda_done") }
 
             odaTimeoutJob?.cancel()
             odaTimeoutJob = null
             odaInFlight.set(false)
+            odaInFlightIsAuto = false
             val cb = odaResultCallback
             clearOdaCallbacks()
 
@@ -809,6 +845,8 @@ object AuthService {
             odaTimeoutJob = null
             odaInFlight.set(false)
             CallManager.getPrimaryCall()?.let { MetricsRecorder.onOdaCompleted(it, outcome = "error", error = e.message ?: "oda verify failed") }
+            CallManager.getPrimaryCall()?.let { MetricsRecorder.onIncomingOdaEnd(it, outcome = "error", error = e.message ?: "oda verify failed") }
+            odaInFlightIsAuto = false
             val cb = odaErrorCallback
             clearOdaCallbacks()
             withContext(Dispatchers.Main) {
@@ -821,9 +859,40 @@ object AuthService {
         ruaComplete = false
         ruaOnlyMode = false
         odaInFlight.set(false)
+        odaInFlightIsAuto = false
+        autoOdaScheduledJob?.cancel()
+        autoOdaScheduledJob = null
         odaTimeoutJob?.cancel()
         odaTimeoutJob = null
         clearOdaCallbacks()
+    }
+
+    private fun scheduleAutoOdaIfEnabled() {
+        if (!Storage.isAutoOdaEnabled()) {
+            return
+        }
+
+        // Best-effort only; never affect core call/auth behavior.
+        autoOdaScheduledJob?.cancel()
+        val call = CallManager.getPrimaryCall() ?: return
+
+        MetricsRecorder.onIncomingAutoOdaPlanned(call, enabled = true, delayMs = AUTO_ODA_DELAY_MS)
+
+        autoOdaScheduledJob = serviceScope.launch {
+            delay(AUTO_ODA_DELAY_MS)
+
+            val attrs = listOf("name", "issuer")
+            requestOnDemandAuthentication(
+                attributes = attrs,
+                isAuto = true,
+                onResult = { _ ->
+                    // No UI for auto mode.
+                },
+                onError = { msg ->
+                    Log.w(TAG, "Auto ODA failed: $msg")
+                }
+            )
+        }
     }
 
     private fun clearOdaCallbacks() {

@@ -172,6 +172,7 @@ class SettingsActivity : SimpleActivity() {
         setupManageSpeedDial()
         setupDiaProtocolToggle()
         setupDiaPeerSessionCache()
+        setupDiaAutoOda()
         setupAutoAnswer()
         setupEnrollment()
         setupDiaResetResults()
@@ -229,6 +230,16 @@ class SettingsActivity : SimpleActivity() {
                     Storage.clearAllPeerSessions()
                     toast("Peer session cache cleared")
                 }
+            }
+        }
+    }
+
+    private fun setupDiaAutoOda() {
+        binding.apply {
+            settingsDiaAutoOda.isChecked = Storage.isAutoOdaEnabled()
+            settingsDiaAutoOdaHolder.setOnClickListener {
+                settingsDiaAutoOda.toggle()
+                Storage.setAutoOdaEnabled(settingsDiaAutoOda.isChecked)
             }
         }
     }

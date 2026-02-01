@@ -15,6 +15,7 @@ object Storage {
     private const val KEY_ENROLLED_PHONE = "enrolled_phone"
 
     private const val KEY_PEER_SESSION_CACHE_ENABLED = "peer_session_cache_enabled"
+    private const val KEY_AUTO_ODA_ENABLED = "auto_oda_enabled"
 
     private const val KEY_ES_HOST_OVERRIDE = "es_host_override"
     private const val KEY_ES_PORT_OVERRIDE = "es_port_override"
@@ -72,6 +73,15 @@ object Storage {
 
     fun setPeerSessionCacheEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_PEER_SESSION_CACHE_ENABLED, enabled).apply()
+    }
+
+    // Auto ODA toggle (default OFF)
+    fun isAutoOdaEnabled(): Boolean {
+        return prefs.getBoolean(KEY_AUTO_ODA_ENABLED, false)
+    }
+
+    fun setAutoOdaEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_AUTO_ODA_ENABLED, enabled).apply()
     }
 
     // Peer session persistence

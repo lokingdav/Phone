@@ -13,6 +13,7 @@ import org.fossify.phone.callerauth.Storage
 import org.fossify.phone.extensions.config
 import java.io.File
 import java.io.FileWriter
+import java.nio.charset.Charset
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -52,11 +53,27 @@ object MetricsRecorder {
         "self_phone",
         "peer_phone",
         "peer_uri",
+        "direction",
         "protocol_enabled",
         "cache_enabled",
+        "rua_only_mode",
         "dia_begin_unix_ms",
         "dia_complete_unix_ms",
         "dia_duration_ms",
+        "ake_begin_unix_ms",
+        "ake_end_unix_ms",
+        "ake_duration_ms",
+        "rua_begin_unix_ms",
+        "rua_end_unix_ms",
+        "rua_duration_ms",
+        "auto_oda_enabled",
+        "auto_oda_delay_ms",
+        "oda_begin_unix_ms",
+        "oda_end_unix_ms",
+        "oda_duration_ms",
+        "oda_outcome",
+        "oda_error",
+        "oda_was_auto",
         "outcome",
         "error"
     )
@@ -83,11 +100,42 @@ object MetricsRecorder {
         val callId: String,
         val peerPhone: String,
         val peerUri: String,
+        val direction: String,
         val protocolEnabled: Boolean,
         val cacheEnabled: Boolean,
+        val ruaOnlyMode: Boolean,
         val diaBeginAtUnixMs: Long,
         val diaBeginAtElapsedMs: Long,
-    )
+    ) {
+        @Volatile var diaCompleteAtUnixMs: Long = 0L
+        @Volatile var diaCompleteAtElapsedMs: Long = 0L
+
+        @Volatile var akeBeginAtUnixMs: Long = 0L
+        @Volatile var akeBeginAtElapsedMs: Long = 0L
+        @Volatile var akeEndAtUnixMs: Long = 0L
+        @Volatile var akeEndAtElapsedMs: Long = 0L
+
+        @Volatile var ruaBeginAtUnixMs: Long = 0L
+        @Volatile var ruaBeginAtElapsedMs: Long = 0L
+        @Volatile var ruaEndAtUnixMs: Long = 0L
+        @Volatile var ruaEndAtElapsedMs: Long = 0L
+
+        @Volatile var autoOdaEnabled: Boolean = false
+        @Volatile var autoOdaDelayMs: Long = 0L
+
+        @Volatile var odaBeginAtUnixMs: Long = 0L
+        @Volatile var odaBeginAtElapsedMs: Long = 0L
+        @Volatile var odaEndAtUnixMs: Long = 0L
+        @Volatile var odaEndAtElapsedMs: Long = 0L
+        @Volatile var odaOutcome: String = ""
+        @Volatile var odaError: String = ""
+        @Volatile var odaWasAuto: Boolean = false
+
+        @Volatile var outcome: String = ""
+        @Volatile var error: String = ""
+
+        @Volatile var flushed: Boolean = false
+    }
 
     private val pendingOutgoingByPeer = ConcurrentHashMap<String, ConcurrentLinkedQueue<AttemptContext>>()
     private val activeByCallKey = ConcurrentHashMap<Int, AttemptContext>()
@@ -216,14 +264,22 @@ object MetricsRecorder {
     fun onCallRemoved(call: Call) {
         val callKey = System.identityHashCode(call)
         activeByCallKey.remove(callKey)
-        incomingDiaDurationByCallKey.remove(callKey)
+        // If we have a completed attempt that hasn't flushed yet (e.g. waiting on auto ODA), flush it on removal.
+        incomingDiaDurationByCallKey.remove(callKey)?.let { attempt ->
+            if (!attempt.flushed && attempt.diaCompleteAtElapsedMs > 0L) {
+                attempt.outcome = attempt.outcome.ifBlank { "call_removed" }
+                attempt.error = attempt.error.ifBlank { "removed_before_flush" }
+                attempt.flushed = true
+                appendIncomingDiaDurationRecord(attempt)
+            }
+        }
     }
 
     /**
      * Incoming DIA duration: marks the moment DIA begins.
      * Pair with [onIncomingDiaEnd] to compute DIA duration bounded to the protocol run.
      */
-    fun onIncomingDiaBegin(call: Call, protocolEnabled: Boolean, cacheEnabled: Boolean) {
+    fun onIncomingDiaBegin(call: Call, protocolEnabled: Boolean, cacheEnabled: Boolean, ruaOnlyMode: Boolean) {
         val context = appContext ?: return
         val callKey = System.identityHashCode(call)
 
@@ -232,14 +288,17 @@ object MetricsRecorder {
 
         val peerUri = call.details.handle?.toString().orEmpty()
         val peerPhone = call.details.handle?.schemeSpecificPart.orEmpty()
+        val direction = if (call.details.callDirection == Call.Details.DIRECTION_INCOMING) "incoming" else "outgoing"
 
         val attempt = IncomingDiaDurationAttempt(
             attemptId = UUID.randomUUID().toString(),
             callId = callKey.toString(),
             peerPhone = peerPhone,
             peerUri = peerUri,
+            direction = direction,
             protocolEnabled = protocolEnabled,
             cacheEnabled = cacheEnabled,
+            ruaOnlyMode = ruaOnlyMode,
             diaBeginAtUnixMs = nowUnixMs,
             diaBeginAtElapsedMs = nowElapsedMs,
         )
@@ -251,20 +310,86 @@ object MetricsRecorder {
      * Incoming DIA duration: records completion time and emits a CSV row.
      */
     fun onIncomingDiaEnd(call: Call, success: Boolean, error: String = "") {
-        val attempt = incomingDiaDurationByCallKey.remove(System.identityHashCode(call)) ?: return
+        val attempt = incomingDiaDurationByCallKey[System.identityHashCode(call)] ?: return
 
         val doneAtUnixMs = System.currentTimeMillis()
         val doneElapsedMs = SystemClock.elapsedRealtime()
-        val durationMs = if (attempt.diaBeginAtElapsedMs > 0L) doneElapsedMs - attempt.diaBeginAtElapsedMs else 0L
 
-        val outcome = if (success) "verified" else "failed"
-        appendIncomingDiaDurationRecord(
-            attempt = attempt,
-            doneAtUnixMs = doneAtUnixMs,
-            durationMs = durationMs,
-            outcome = outcome,
-            error = error
-        )
+        attempt.diaCompleteAtUnixMs = doneAtUnixMs
+        attempt.diaCompleteAtElapsedMs = doneElapsedMs
+        attempt.outcome = if (success) "verified" else "failed"
+        attempt.error = error
+
+        maybeFlushIncomingDiaDuration(call, attempt, force = false)
+    }
+
+    fun onIncomingAkeBegin(call: Call) {
+        val attempt = incomingDiaDurationByCallKey[System.identityHashCode(call)] ?: return
+        if (attempt.akeBeginAtElapsedMs > 0L) return
+        attempt.akeBeginAtUnixMs = System.currentTimeMillis()
+        attempt.akeBeginAtElapsedMs = SystemClock.elapsedRealtime()
+    }
+
+    fun onIncomingAkeEnd(call: Call) {
+        val attempt = incomingDiaDurationByCallKey[System.identityHashCode(call)] ?: return
+        if (attempt.akeEndAtElapsedMs > 0L) return
+        attempt.akeEndAtUnixMs = System.currentTimeMillis()
+        attempt.akeEndAtElapsedMs = SystemClock.elapsedRealtime()
+    }
+
+    fun onIncomingRuaBegin(call: Call) {
+        val attempt = incomingDiaDurationByCallKey[System.identityHashCode(call)] ?: return
+        if (attempt.ruaBeginAtElapsedMs > 0L) return
+        attempt.ruaBeginAtUnixMs = System.currentTimeMillis()
+        attempt.ruaBeginAtElapsedMs = SystemClock.elapsedRealtime()
+    }
+
+    fun onIncomingRuaEnd(call: Call) {
+        val attempt = incomingDiaDurationByCallKey[System.identityHashCode(call)] ?: return
+        if (attempt.ruaEndAtElapsedMs > 0L) return
+        attempt.ruaEndAtUnixMs = System.currentTimeMillis()
+        attempt.ruaEndAtElapsedMs = SystemClock.elapsedRealtime()
+    }
+
+    fun onIncomingAutoOdaPlanned(call: Call, enabled: Boolean, delayMs: Long) {
+        val attempt = incomingDiaDurationByCallKey[System.identityHashCode(call)] ?: return
+        attempt.autoOdaEnabled = enabled
+        attempt.autoOdaDelayMs = delayMs
+    }
+
+    fun onIncomingOdaBegin(call: Call, wasAuto: Boolean = false) {
+        val attempt = incomingDiaDurationByCallKey[System.identityHashCode(call)] ?: return
+        if (attempt.odaBeginAtElapsedMs > 0L) return
+        attempt.odaWasAuto = wasAuto
+        attempt.odaBeginAtUnixMs = System.currentTimeMillis()
+        attempt.odaBeginAtElapsedMs = SystemClock.elapsedRealtime()
+    }
+
+    fun onIncomingOdaEnd(call: Call, outcome: String, error: String = "") {
+        val attempt = incomingDiaDurationByCallKey[System.identityHashCode(call)] ?: return
+        if (attempt.odaEndAtElapsedMs > 0L) return
+        attempt.odaEndAtUnixMs = System.currentTimeMillis()
+        attempt.odaEndAtElapsedMs = SystemClock.elapsedRealtime()
+        attempt.odaOutcome = outcome
+        attempt.odaError = error
+        maybeFlushIncomingDiaDuration(call, attempt, force = false)
+    }
+
+    private fun maybeFlushIncomingDiaDuration(call: Call, attempt: IncomingDiaDurationAttempt, force: Boolean) {
+        if (attempt.flushed) return
+        if (attempt.diaCompleteAtElapsedMs <= 0L) return
+
+        val shouldWaitForOda = attempt.autoOdaEnabled
+        val odaDone = attempt.odaEndAtElapsedMs > 0L
+
+        if (!force && shouldWaitForOda && !odaDone) {
+            return
+        }
+
+        attempt.flushed = true
+        // Remove from map once flushed so we don't double-write.
+        incomingDiaDurationByCallKey.remove(System.identityHashCode(call))
+        appendIncomingDiaDurationRecord(attempt)
     }
 
 
@@ -363,26 +488,94 @@ object MetricsRecorder {
     }
 
     private fun ensureIncomingDiaDurationHeader(file: File) {
-        if (file.exists() && file.length() > 0) {
+        file.parentFile?.mkdirs()
+
+        val desiredHeaderLine = incomingDiaDurationHeader.joinToString(",") { escapeCsv(it) }
+
+        if (!file.exists() || file.length() == 0L) {
+            FileWriter(file, true).use { fw ->
+                fw.append(desiredHeaderLine)
+                fw.append("\n")
+            }
             return
         }
-        file.parentFile?.mkdirs()
-        FileWriter(file, true).use { fw ->
-            fw.append(incomingDiaDurationHeader.joinToString(",") { escapeCsv(it) })
-            fw.append("\n")
+
+        // If header already matches, nothing to do.
+        val firstLine = try {
+            file.inputStream().bufferedReader(Charset.forName("UTF-8")).use { it.readLine().orEmpty() }
+        } catch (_: Exception) {
+            ""
+        }
+
+        if (firstLine == desiredHeaderLine) {
+            return
+        }
+
+        // Migrate: rewrite header and pad existing rows with extra empty columns.
+        try {
+            val lines = file.readLines(Charset.forName("UTF-8"))
+            if (lines.isEmpty()) {
+                FileWriter(file, false).use { fw ->
+                    fw.append(desiredHeaderLine)
+                    fw.append("\n")
+                }
+                return
+            }
+
+            val oldHeaderCols = lines.first().split(',').size
+            val newHeaderCols = incomingDiaDurationHeader.size
+            val extraCols = (newHeaderCols - oldHeaderCols).coerceAtLeast(0)
+
+            FileWriter(file, false).use { fw ->
+                fw.append(desiredHeaderLine)
+                fw.append("\n")
+
+                for (i in 1 until lines.size) {
+                    val line = lines[i]
+                    if (line.isBlank()) continue
+                    if (extraCols == 0) {
+                        fw.append(line)
+                        fw.append("\n")
+                    } else {
+                        fw.append(line)
+                        repeat(extraCols) { fw.append(',') }
+                        fw.append("\n")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed migrating incoming DIA duration CSV header: ${e.message}", e)
         }
     }
 
-    private fun appendIncomingDiaDurationRecord(
-        attempt: IncomingDiaDurationAttempt,
-        doneAtUnixMs: Long,
-        durationMs: Long,
-        outcome: String,
-        error: String,
-    ) {
+    private fun appendIncomingDiaDurationRecord(attempt: IncomingDiaDurationAttempt) {
         scope.launch {
             val context = appContext ?: return@launch
             val selfPhone = Storage.loadEnrolledPhone().orEmpty()
+
+            val diaDurationMs = if (attempt.diaBeginAtElapsedMs > 0L && attempt.diaCompleteAtElapsedMs > 0L) {
+                attempt.diaCompleteAtElapsedMs - attempt.diaBeginAtElapsedMs
+            } else {
+                0L
+            }
+
+            val akeDurationMs = if (attempt.akeBeginAtElapsedMs > 0L && attempt.akeEndAtElapsedMs > 0L) {
+                attempt.akeEndAtElapsedMs - attempt.akeBeginAtElapsedMs
+            } else {
+                0L
+            }
+
+            val ruaDurationMs = if (attempt.ruaBeginAtElapsedMs > 0L && attempt.ruaEndAtElapsedMs > 0L) {
+                attempt.ruaEndAtElapsedMs - attempt.ruaBeginAtElapsedMs
+            } else {
+                0L
+            }
+
+            val odaDurationMs = if (attempt.odaBeginAtElapsedMs > 0L && attempt.odaEndAtElapsedMs > 0L) {
+                attempt.odaEndAtElapsedMs - attempt.odaBeginAtElapsedMs
+            } else {
+                0L
+            }
 
             val rec = listOf(
                 attempt.attemptId,
@@ -390,13 +583,29 @@ object MetricsRecorder {
                 selfPhone,
                 attempt.peerPhone,
                 attempt.peerUri,
+                attempt.direction,
                 attempt.protocolEnabled.toString(),
                 attempt.cacheEnabled.toString(),
+                attempt.ruaOnlyMode.toString(),
                 attempt.diaBeginAtUnixMs.toString(),
-                doneAtUnixMs.toString(),
-                durationMs.toString(),
-                outcome,
-                error
+                attempt.diaCompleteAtUnixMs.toString(),
+                diaDurationMs.toString(),
+                attempt.akeBeginAtUnixMs.toString(),
+                attempt.akeEndAtUnixMs.toString(),
+                akeDurationMs.toString(),
+                attempt.ruaBeginAtUnixMs.toString(),
+                attempt.ruaEndAtUnixMs.toString(),
+                ruaDurationMs.toString(),
+                attempt.autoOdaEnabled.toString(),
+                attempt.autoOdaDelayMs.toString(),
+                attempt.odaBeginAtUnixMs.toString(),
+                attempt.odaEndAtUnixMs.toString(),
+                odaDurationMs.toString(),
+                attempt.odaOutcome,
+                attempt.odaError,
+                attempt.odaWasAuto.toString(),
+                attempt.outcome,
+                attempt.error
             )
 
             synchronized(fileLock) {
