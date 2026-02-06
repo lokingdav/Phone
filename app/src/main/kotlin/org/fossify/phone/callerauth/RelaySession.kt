@@ -221,10 +221,11 @@ class RelaySession(
 
                 // Start receiving responses
                 client.stub.tunnel(requestFlow).collect { response ->
+                    val recvTime = System.currentTimeMillis()
                     when (response.type) {
                         Relay.RelayResponse.Type.EVENT -> {
                             val payload = response.payload.toByteArray()
-                            Log.d(TAG, "Received EVENT on topic ${response.topic} (${payload.size} bytes)")
+                            Log.d(TAG, "TIMING: EVENT received at +${recvTime - t0}ms on topic ${response.topic} (${payload.size} bytes)")
                             onMessageCallback?.invoke(payload)
                             backoffIndex = 0 // Reset backoff on successful message
                         }

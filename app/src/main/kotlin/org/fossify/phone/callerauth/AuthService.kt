@@ -352,7 +352,7 @@ object AuthService {
                     Log.d(TAG, "TIMING: oob.start+awaitConnected took ${System.currentTimeMillis() - t0}ms")
 
                     MetricsRecorder.onIncomingRuaBegin(call)
-                    Log.d(TAG, "Subscribed to RUA topic, waiting for RUA_REQUEST...")
+                    Log.d(TAG, "TIMING: RUA timer started at ${System.currentTimeMillis()}, waiting for RUA_REQUEST...")
 
                     startProtocolTimeout()
                     return@launch
@@ -410,6 +410,7 @@ object AuthService {
      * Handles incoming OOB messages and routes to appropriate handler.
      */
     private fun handleOobMessage(payload: ByteArray) {
+        val receiveTime = System.currentTimeMillis()
         serviceScope.launch {
             try {
                 val callState = currentCallState
@@ -418,7 +419,7 @@ object AuthService {
                     return@launch
                 }
                 
-                Log.d(TAG, "Processing OOB message (${payload.size} bytes)")
+                Log.d(TAG, "TIMING: OOB message received at $receiveTime (${payload.size} bytes)")
                 
                 // Parse message (use() auto-closes the handle)
                 DiaMessage.parse(payload).use { message ->
