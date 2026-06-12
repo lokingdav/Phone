@@ -191,6 +191,7 @@ dependencies {
     implementation(libs.grpc.protobuf.lite)
     implementation(libs.grpc.stub)
     implementation(libs.javax.annotation.api)
+    implementation("com.google.android.gms:play-services-auth-api-phone:18.1.0")
 
     // Added: Protobuf-javalite for core protobuf classes and well-known types like Timestamp
     implementation("com.google.protobuf:protobuf-javalite:3.25.3")

@@ -171,6 +171,7 @@ class SettingsActivity : SimpleActivity() {
         setupManageBlockedNumbers()
         setupManageSpeedDial()
         setupDiaProtocolToggle()
+        setupDiaEnrollmentSms()
         setupDiaPeerSessionCache()
         setupDiaAutoOda()
         setupAutoAnswer()
@@ -215,6 +216,16 @@ class SettingsActivity : SimpleActivity() {
             settingsDiaProtocolHolder.setOnClickListener {
                 settingsDiaProtocol.toggle()
                 config.diaProtocolEnabled = settingsDiaProtocol.isChecked
+            }
+        }
+    }
+
+    private fun setupDiaEnrollmentSms() {
+        binding.apply {
+            settingsDiaEnrollmentSms.isChecked = Storage.isEnrollmentSmsEnabled()
+            settingsDiaEnrollmentSmsHolder.setOnClickListener {
+                settingsDiaEnrollmentSms.toggle()
+                Storage.setEnrollmentSmsEnabled(settingsDiaEnrollmentSms.isChecked)
             }
         }
     }

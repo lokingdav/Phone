@@ -5,6 +5,8 @@ package denseid.enrollment.v1;
 option go_package = "github.com/dense-identity/denseid/api/go/enrollment/v1;enrollmentpb";
 
 service EnrollmentService {
+  rpc StartEnrollment(EnrollmentRequest) returns (StartEnrollmentResponse);
+  rpc CompleteEnrollment(CompleteEnrollmentRequest) returns (EnrollmentResponse);
   rpc EnrollSubscriber(EnrollmentRequest) returns (EnrollmentResponse);
 }
 
@@ -20,4 +22,15 @@ message EnrollmentRequest {
 // are encoded within dia_response by the DIA library.
 message EnrollmentResponse {
   bytes dia_response = 1;  // Serialized DIA enrollment response
+}
+
+// StartEnrollmentResponse returns the OTP code when SMS sending is disabled.
+message StartEnrollmentResponse {
+  string otp_code = 1;
+}
+
+// CompleteEnrollmentRequest contains only the OTP challenge.
+// c = H(request_payload || code), hex-encoded.
+message CompleteEnrollmentRequest {
+  string c = 1;
 }

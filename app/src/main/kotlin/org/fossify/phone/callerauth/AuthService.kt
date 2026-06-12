@@ -74,12 +74,15 @@ object AuthService {
         phoneNumber: String,
         displayName: String,
         logoUrl: String,
+        otpProvider: suspend (fallbackOtp: String?) -> String = { fallbackOtp ->
+            fallbackOtp ?: throw IllegalStateException("OTP required but no provider available")
+        },
         onComplete: ((success: Boolean, error: String?) -> Unit)? = null
     ) {
         serviceScope.launch {
             try {
                 Log.d(TAG, "▶ Starting enrollment for $phoneNumber")
-                ManageEnrollment.enroll(phoneNumber, displayName, logoUrl)
+                ManageEnrollment.enroll(phoneNumber, displayName, logoUrl, otpProvider = otpProvider)
                 Log.d(TAG, "✅ Enrollment completed successfully")
                 onComplete?.invoke(true, null)
             } catch (e: CancellationException) {
@@ -140,7 +143,7 @@ object AuthService {
                     callState.applyPeerSession(cachedSession)
 
                     val ruaTopic = callState.ruaDeriveTopic()
-                    val ticket = callState.ticket
+                    val token = callState.token
                     val senderID = callState.senderId
 
                     // Transition to RUA so currentTopic matches the topic we'll subscribe to.
@@ -154,7 +157,8 @@ object AuthService {
                         relayHost = Storage.getEffectiveRsHost(),
                         relayPort = Storage.getEffectiveRsPort(),
                         initialTopic = ruaTopic,
-                        ticket = ticket,
+                        token = token,
+                        accessConfig = config,
                         senderID = senderID,
                         scope = serviceScope,
                         useTls = false,
@@ -187,7 +191,7 @@ object AuthService {
                 
                 // Get OOB channel parameters
                 val akeTopic = callState.akeTopic
-                val ticket = callState.ticket
+                val token = callState.token
                 val senderID = callState.senderId
                 
                 Log.d(TAG, "AKE initialized - topic: $akeTopic, senderID: $senderID")
@@ -201,7 +205,8 @@ object AuthService {
                     relayHost = Storage.getEffectiveRsHost(),
                     relayPort = Storage.getEffectiveRsPort(),
                     initialTopic = akeTopic,
-                    ticket = ticket,
+                    token = token,
+                    accessConfig = config,
                     senderID = senderID,
                     scope = serviceScope,
                     useTls = false,
@@ -315,7 +320,7 @@ object AuthService {
                     val ruaTopic = callState.ruaDeriveTopic()
                     Log.d(TAG, "TIMING: ruaDeriveTopic took ${System.currentTimeMillis() - t0}ms")
                     
-                    val ticket = callState.ticket
+                    val token = callState.token
                     val senderID = callState.senderId
 
                     protocolCompleteCallback = onProtocolComplete
@@ -335,7 +340,8 @@ object AuthService {
                         relayHost = Storage.getEffectiveRsHost(),
                         relayPort = Storage.getEffectiveRsPort(),
                         initialTopic = ruaTopic,
-                        ticket = ticket,
+                        token = token,
+                        accessConfig = config,
                         senderID = senderID,
                         scope = serviceScope,
                         useTls = false,
@@ -364,7 +370,7 @@ object AuthService {
                 
                 // Get OOB channel parameters
                 val akeTopic = callState.akeTopic
-                val ticket = callState.ticket
+                val token = callState.token
                 val senderID = callState.senderId
                 
                 Log.d(TAG, "AKE initialized - topic: $akeTopic, senderID: $senderID")
@@ -377,7 +383,8 @@ object AuthService {
                     relayHost = Storage.getEffectiveRsHost(),
                     relayPort = Storage.getEffectiveRsPort(),
                     initialTopic = akeTopic,
-                    ticket = ticket,
+                    token = token,
+                    accessConfig = config,
                     senderID = senderID,
                     scope = serviceScope,
                     useTls = false,
@@ -536,13 +543,13 @@ object AuthService {
             val ruaRequest = callState.ruaRequest()
             
             // Get ticket for topic creation
-            val ticket = callState.ticket
+            val token = callState.token
             
             // Transition to RUA state
             callState.transitionToRua()
 
             // Subscribe to RUA topic with piggyback RUA request
-            oobController?.subscribeToNewTopic(ruaTopic, ruaRequest, ticket)
+            oobController?.subscribeToNewTopic(ruaTopic, ruaRequest, token)
             Log.d(TAG, "Subscribed to RUA topic with RUA_REQUEST")
             
             Log.d(TAG, "Waiting for RUA_RESPONSE...")
@@ -663,7 +670,7 @@ object AuthService {
             callState.transitionToRua()
             
             // Subscribe to RUA topic (with replay to get RUA_REQUEST)
-            oobController?.subscribeToNewTopic(ruaTopic, piggybackMessage = null, ticket = callState.ticket)
+            oobController?.subscribeToNewTopic(ruaTopic, piggybackMessage = null, token = callState.token)
             Log.d(TAG, "Subscribed to RUA topic")
             
             // Initialize RUA

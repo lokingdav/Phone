@@ -86,6 +86,7 @@
     <string name="auto_oda">Auto ODA</string>
     <string name="run_benchmarks">Run Op/ms Benchmarks</string>
     <string name="hide_dialpad_numbers">Hide dialpad numbers</string>
+    <string name="enrollment_sms_otp">Read enrollment OTP from SMS</string>
     <string name="export_call_history">Export call history</string>
     <string name="import_call_history">Import call history</string>
 

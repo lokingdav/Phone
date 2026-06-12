@@ -1,6 +1,7 @@
 package org.fossify.phone.callerauth
 
 import android.util.Log
+import io.github.lokingdav.libdia.DiaConfig
 import kotlinx.coroutines.*
 
 /**
@@ -12,7 +13,8 @@ class OobController(
     private val relayHost: String,
     private val relayPort: Int,
     initialTopic: String,
-    ticket: ByteArray,
+    token: ByteArray,
+    accessConfig: DiaConfig,
     private val senderID: String,
     private val scope: CoroutineScope,
     useTls: Boolean = true,
@@ -24,7 +26,7 @@ class OobController(
     }
 
     private val client = RelayClient(relayHost, relayPort, useTls)
-    private val session = RelaySession(client, initialTopic, ticket, senderID)
+    private val session = RelaySession(client, initialTopic, token, accessConfig, senderID)
     
     private var heartbeatJob: Job? = null
     private var messageCallback: ((ByteArray) -> Unit)? = null
@@ -99,16 +101,16 @@ class OobController(
     /**
      * Sends a message to a specific topic.
      */
-    suspend fun sendToTopic(topic: String, payload: ByteArray, ticket: ByteArray? = null) {
-        session.sendToTopic(topic, payload, ticket)
+    suspend fun sendToTopic(topic: String, payload: ByteArray, token: ByteArray? = null, isTerminal: Boolean = false) {
+        session.sendToTopic(topic, payload, token, isTerminal)
     }
 
     /**
      * Subscribes to a new topic (with replay) and optionally sends a message.
      */
-    suspend fun subscribeToNewTopic(newTopic: String, piggybackMessage: ByteArray? = null, ticket: ByteArray) {
+    suspend fun subscribeToNewTopic(newTopic: String, piggybackMessage: ByteArray? = null, token: ByteArray) {
         Log.d(TAG, "Subscribing to new topic: $newTopic")
-        session.subscribeToNewTopic(newTopic, piggybackMessage, ticket)
+        session.subscribeToNewTopic(newTopic, piggybackMessage, token)
     }
 
     /**

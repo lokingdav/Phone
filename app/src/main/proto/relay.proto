@@ -13,8 +13,11 @@ message RelayRequest {
   Type   type      = 2;  // PUBLISH | SUBSCRIBE
 
   string topic     = 3;  // target topic (all ops)
+  bool   is_bye    = 4;  // true for terminal DIA frames (bye or ake_complete)
   bytes  payload   = 5;  // body for PUBLISH; optional one-shot publish on SUBSCRIBE
   bytes  ticket    = 6;  // required for SUBSCRIBE (costs 1 token); ignored for PUBLISH
+  bytes  access_proof = 7; // RS-only auth proof; must not be relayed
+  bytes  access_expiration = 8; // RS-only expiration disclosure for access proof
 
   enum Type {
     TYPE_UNSPECIFIED = 0;

@@ -3,15 +3,16 @@ package org.fossify.phone.callerauth
 import android.util.Log
 import com.google.protobuf.ByteString
 import denseid.relay.v1.Relay
+import io.github.lokingdav.libdia.AccessProof
+import io.github.lokingdav.libdia.DiaMessage
+import io.github.lokingdav.libdia.DiaConfig
 import io.github.lokingdav.libdia.LibDia
-import io.grpc.Status
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -22,13 +23,13 @@ import java.util.concurrent.atomic.AtomicBoolean
 class RelaySession(
     private val client: RelayClient,
     initialTopic: String,
-    private val ticket: ByteArray,
+    private val token: ByteArray,
+    private val accessConfig: DiaConfig,
     private val senderID: String = UUID.randomUUID().toString()
 ) {
     companion object {
         private const val TAG = "CallAuth-RelaySession"
         private val RETRY_BACKOFF_MS = longArrayOf(0L, 500L, 1000L, 2000L, 5000L)
-
         private const val MAC_TOKEN_PREIMAGE_LEN = 32
     }
 
@@ -91,44 +92,40 @@ class RelaySession(
         }
 
         val topic = topicMutex.withLock { currentTopic }
-        val macTicket = tryBuildMacTicket(Relay.RelayRequest.Type.PUBLISH, topic, payload, ticket)
-        if (macTicket == null) {
-            Log.e(TAG, "Cannot send PUBLISH - failed to build MAC ticket")
+        val request = tryBuildRelayRequest(
+            type = Relay.RelayRequest.Type.PUBLISH,
+            topic = topic,
+            payload = payload,
+            token = token,
+            isTerminal = isTerminalPayload(payload)
+        )
+        if (request == null) {
+            Log.e(TAG, "Cannot send PUBLISH - failed to build relay request")
             return
         }
-        val request = Relay.RelayRequest.newBuilder()
-            .setSenderId(senderID)
-            .setType(Relay.RelayRequest.Type.PUBLISH)
-            .setTopic(topic)
-            .setPayload(ByteString.copyFrom(payload))
-            .setTicket(ByteString.copyFrom(macTicket))
-            .build()
-        
+
         enqueue(request)
     }
 
     /**
      * Publishes payload to a specific topic (with optional ticket).
      */
-    suspend fun sendToTopic(topic: String, payload: ByteArray, ticket: ByteArray? = null) {
+    suspend fun sendToTopic(topic: String, payload: ByteArray, token: ByteArray? = null, isTerminal: Boolean = false) {
         if (closed.get() || topic.isEmpty() || payload.isEmpty()) {
             return
         }
 
-        val token = ticket ?: this.ticket
-        val macTicket = tryBuildMacTicket(Relay.RelayRequest.Type.PUBLISH, topic, payload, token)
-        if (macTicket == null) {
-            Log.e(TAG, "Cannot send PUBLISH - failed to build MAC ticket")
+        val request = tryBuildRelayRequest(
+            type = Relay.RelayRequest.Type.PUBLISH,
+            topic = topic,
+            payload = payload,
+            token = token ?: this.token,
+            isTerminal = isTerminal
+        )
+        if (request == null) {
+            Log.e(TAG, "Cannot send PUBLISH - failed to build relay request")
             return
         }
-
-        val request = Relay.RelayRequest.newBuilder()
-            .setSenderId(senderID)
-            .setType(Relay.RelayRequest.Type.PUBLISH)
-            .setTopic(topic)
-            .setPayload(ByteString.copyFrom(payload))
-            .setTicket(ByteString.copyFrom(macTicket))
-            .build()
         
         enqueue(request)
     }
@@ -136,27 +133,23 @@ class RelaySession(
     /**
      * Subscribes to a new topic with replay, optionally piggy-backing a publish.
      */
-    suspend fun subscribeToNewTopic(newTopic: String, piggybackPayload: ByteArray? = null, ticket: ByteArray) {
+    suspend fun subscribeToNewTopic(newTopic: String, piggybackPayload: ByteArray? = null, token: ByteArray) {
         if (closed.get() || newTopic.isEmpty()) {
             return
         }
 
         val payloadBytes = piggybackPayload ?: ByteArray(0)
-        val macTicket = tryBuildMacTicket(Relay.RelayRequest.Type.SUBSCRIBE, newTopic, payloadBytes, ticket)
-        if (macTicket == null) {
-            Log.e(TAG, "Cannot send SUBSCRIBE - failed to build MAC ticket")
+        val request = tryBuildRelayRequest(
+            type = Relay.RelayRequest.Type.SUBSCRIBE,
+            topic = newTopic,
+            payload = payloadBytes,
+            token = token,
+            isTerminal = false
+        )
+        if (request == null) {
+            Log.e(TAG, "Cannot send SUBSCRIBE - failed to build relay request")
             return
         }
-
-        val request = Relay.RelayRequest.newBuilder()
-            .setSenderId(senderID)
-            .setType(Relay.RelayRequest.Type.SUBSCRIBE)
-            .setTopic(newTopic)
-            .apply {
-                piggybackPayload?.let { setPayload(ByteString.copyFrom(it)) }
-                setTicket(ByteString.copyFrom(macTicket))
-            }
-            .build()
         
         // Update local topic optimistically
         topicMutex.withLock { currentTopic = newTopic }
@@ -197,17 +190,16 @@ class RelaySession(
                     // First, send SUBSCRIBE to current topic (with replay)
                     val topic = topicMutex.withLock { currentTopic }
 
-                    val macTicket = tryBuildMacTicket(Relay.RelayRequest.Type.SUBSCRIBE, topic, ByteArray(0), ticket)
-                    if (macTicket == null) {
-                        throw IllegalStateException("failed to build MAC ticket for initial SUBSCRIBE")
+                    val subscribeRequest = tryBuildRelayRequest(
+                        type = Relay.RelayRequest.Type.SUBSCRIBE,
+                        topic = topic,
+                        payload = ByteArray(0),
+                        token = token,
+                        isTerminal = false
+                    )
+                    if (subscribeRequest == null) {
+                        throw IllegalStateException("failed to build initial SUBSCRIBE request")
                     }
-
-                    val subscribeRequest = Relay.RelayRequest.newBuilder()
-                        .setSenderId(senderID)
-                        .setType(Relay.RelayRequest.Type.SUBSCRIBE)
-                        .setTopic(topic)
-                        .setTicket(ByteString.copyFrom(macTicket))
-                        .build()
                     
                     emit(subscribeRequest)
                     Log.d(TAG, "TIMING: SUBSCRIBE emitted at +${System.currentTimeMillis() - t0}ms")
@@ -294,7 +286,7 @@ class RelaySession(
         }
     }
 
-    private fun macDataForReq(type: Relay.RelayRequest.Type, topic: String, payload: ByteArray): ByteArray {
+    private fun accessDataForReq(type: Relay.RelayRequest.Type, topic: String, payload: ByteArray): ByteArray {
         val topicBytes = topic.toByteArray(Charsets.UTF_8)
         val data = ByteArray(1 + topicBytes.size + payload.size)
         data[0] = type.number.toByte()
@@ -303,30 +295,53 @@ class RelaySession(
         return data
     }
 
-    private fun tryBuildMacTicket(
+    private fun tryBuildRelayRequest(
         type: Relay.RelayRequest.Type,
         topic: String,
         payload: ByteArray,
         token: ByteArray,
-    ): ByteArray? {
+        isTerminal: Boolean,
+    ): Relay.RelayRequest? {
         if (token.size < MAC_TOKEN_PREIMAGE_LEN) {
-            Log.e(TAG, "Token too short for MAC ticket: len=${token.size}")
+            Log.e(TAG, "Token too short for relay request: len=${token.size}")
             return null
         }
         return try {
-            val data = macDataForReq(type, topic, payload)
-            val mac = LibDia.messageCreateMac(token, data)
-            if (mac.size != 32) {
-                Log.w(TAG, "Unexpected MAC length: ${mac.size}")
-            }
-            val preimage = token.copyOfRange(0, MAC_TOKEN_PREIMAGE_LEN)
-            ByteArray(preimage.size + mac.size).apply {
-                System.arraycopy(preimage, 0, this, 0, preimage.size)
-                System.arraycopy(mac, 0, this, preimage.size, mac.size)
-            }
+            val ticket = token.copyOfRange(0, MAC_TOKEN_PREIMAGE_LEN)
+            val accessData = accessDataForReq(type, topic, payload)
+            val accessProof = AccessProof.createFromConfig(accessConfig, ticket, accessData)
+
+            Relay.RelayRequest.newBuilder()
+                .setSenderId(senderID)
+                .setType(type)
+                .setTopic(topic)
+                .setIsBye(isTerminal)
+                .setTicket(ByteString.copyFrom(ticket))
+                .setAccessProof(ByteString.copyFrom(accessProof.proof))
+                .setAccessExpiration(ByteString.copyFrom(accessProof.expiration))
+                .apply {
+                    if (payload.isNotEmpty()) {
+                        setPayload(ByteString.copyFrom(payload))
+                    }
+                }
+                .build()
         } catch (e: Throwable) {
-            Log.e(TAG, "Failed to build MAC ticket: ${e.message}")
+            Log.e(TAG, "Failed to build relay request: ${e.message}")
             null
+        }
+    }
+
+    private fun isTerminalPayload(payload: ByteArray): Boolean {
+        val message = try {
+            DiaMessage.parse(payload)
+        } catch (_: Exception) {
+            return false
+        }
+
+        return try {
+            message.isBye || message.isAkeComplete
+        } finally {
+            message.close()
         }
     }
 }

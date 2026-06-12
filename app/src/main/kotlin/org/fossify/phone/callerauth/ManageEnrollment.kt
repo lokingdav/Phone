@@ -9,7 +9,6 @@ import io.grpc.ManagedChannelBuilder
 import io.grpc.StatusRuntimeException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.fossify.phone.BuildConfig
 import org.fossify.phone.App
 import java.util.concurrent.TimeUnit
 
@@ -31,10 +30,14 @@ object ManageEnrollment {
         phoneNumber: String,
         displayName: String,
         logoUrl: String,
-        numTickets: Int = 5
+        numTickets: Int = 5,
+        otpProvider: suspend (fallbackOtp: String?) -> String = { fallbackOtp ->
+            fallbackOtp ?: throw IllegalStateException("OTP required but no provider available")
+        }
     ) = withContext(Dispatchers.IO) {
         Log.d(TAG, "▶ Starting enrollment for $phoneNumber")
-        
+        var keysHandle: ByteArray? = null
+
         try {
             // Step 1: Create enrollment request using LibDia v2
             Log.d(TAG, "Creating enrollment request...")
@@ -42,8 +45,9 @@ object ManageEnrollment {
                 phone = phoneNumber,
                 name = displayName,
                 logoUrl = logoUrl,
-                numTickets = numTickets
+                numTokens = numTickets
             )
+            keysHandle = enrollmentRequest.keysHandle
             Log.d(TAG, "✓ Enrollment request created (${enrollmentRequest.requestData.size} bytes)")
             
             // Step 2: Wrap in protobuf for gRPC transport
@@ -51,12 +55,24 @@ object ManageEnrollment {
                 .setDiaRequest(ByteString.copyFrom(enrollmentRequest.requestData))
                 .build()
             
-            // Step 3: Call enrollment server via gRPC
-            Log.d(TAG, "Calling enrollment server at ${BuildConfig.ES_HOST}:${BuildConfig.ES_PORT}...")
-            val response = callServer(protoRequest)
-            Log.d(TAG, "✓ Server responded (${response.diaResponse.size()} bytes)")
+            // Step 3: Start enrollment and obtain OTP.
+            Log.d(TAG, "Starting enrollment with server...")
+            val startResponse = startEnrollment(protoRequest)
+            Log.d(TAG, "✓ StartEnrollment responded")
+
+            val otpCode = startResponse.otpCode
+                .takeIf { it.isNotBlank() }
+                ?: otpProvider(null)
+            Log.d(TAG, "✓ OTP acquired")
+
+            // Step 4: Complete enrollment with computed challenge.
+            val challenge = DiaEnrollment.computeChallenge(enrollmentRequest.requestData, otpCode)
+            Log.d(TAG, "✓ OTP challenge computed")
+
+            val response = completeEnrollment(challenge)
+            Log.d(TAG, "✓ CompleteEnrollment responded (${response.diaResponse.size()} bytes)")
             
-            // Step 4: Finalize enrollment with server response
+            // Step 5: Finalize enrollment with server response
             Log.d(TAG, "Finalizing enrollment...")
             val config = DiaEnrollment.finalize(
                 keysHandle = enrollmentRequest.keysHandle,
@@ -67,19 +83,15 @@ object ManageEnrollment {
             )
             Log.d(TAG, "✓ Enrollment finalized")
             
-            // Step 5: Serialize and save config
+            // Step 6: Serialize and save config
             val envString = config.toEnv()
             Storage.saveDiaConfig(envString)
             Storage.saveEnrolledPhone(phoneNumber)
             Log.d(TAG, "✓ Config saved to storage")
             
-            // Step 6: Reload App.diaConfig so it's immediately available
+            // Step 7: Reload App.diaConfig so it's immediately available
             App.reloadDiaConfig()
             Log.d(TAG, "✓ App.diaConfig reloaded")
-            
-            // Step 7: Clean up temporary keys
-            DiaEnrollment.destroyKeys(enrollmentRequest.keysHandle)
-            Log.d(TAG, "✓ Temporary keys destroyed")
             
             // Close config resource
             config.close()
@@ -89,13 +101,19 @@ object ManageEnrollment {
         } catch (e: Exception) {
             Log.e(TAG, "❌ Enrollment failed for $phoneNumber", e)
             throw e
+        } finally {
+            keysHandle?.let {
+                runCatching { DiaEnrollment.destroyKeys(it) }
+                    .onSuccess { Log.d(TAG, "✓ Temporary keys destroyed") }
+                    .onFailure { destroyError -> Log.w(TAG, "Failed to destroy temporary keys", destroyError) }
+            }
         }
     }
 
     /**
      * Calls the enrollment server via gRPC.
      */
-    private fun callServer(req: Enrollment.EnrollmentRequest): Enrollment.EnrollmentResponse {
+    private fun startEnrollment(req: Enrollment.EnrollmentRequest): Enrollment.StartEnrollmentResponse {
         val esHost = Storage.getEffectiveEsHost()
         val esPort = Storage.getEffectiveEsPort()
         val channel = ManagedChannelBuilder
@@ -107,9 +125,38 @@ object ManageEnrollment {
             .withDeadlineAfter(10, TimeUnit.SECONDS)
 
         try {
-            Log.d(TAG, "⏳ Sending enrollment request to server...")
-            val resp = stub.enrollSubscriber(req)
-            Log.d(TAG, "✔️ Received enrollment response")
+            Log.d(TAG, "⏳ Sending StartEnrollment request to server...")
+            val resp = stub.startEnrollment(req)
+            Log.d(TAG, "✔️ Received StartEnrollment response")
+            return resp
+        } catch (e: StatusRuntimeException) {
+            Log.e(TAG, "⚠️ RPC failed: ${e.status}", e)
+            throw e
+        } finally {
+            channel.shutdownNow()
+            Log.d(TAG, "↩ gRPC channel closed")
+        }
+    }
+
+    private fun completeEnrollment(challenge: String): Enrollment.EnrollmentResponse {
+        val esHost = Storage.getEffectiveEsHost()
+        val esPort = Storage.getEffectiveEsPort()
+        val channel = ManagedChannelBuilder
+            .forAddress(esHost, esPort)
+            .usePlaintext()
+            .build()
+
+        val stub = EnrollmentServiceGrpc.newBlockingStub(channel)
+            .withDeadlineAfter(10, TimeUnit.SECONDS)
+
+        try {
+            Log.d(TAG, "⏳ Sending CompleteEnrollment request to server...")
+            val resp = stub.completeEnrollment(
+                Enrollment.CompleteEnrollmentRequest.newBuilder()
+                    .setC(challenge)
+                    .build()
+            )
+            Log.d(TAG, "✔️ Received CompleteEnrollment response")
             return resp
         } catch (e: StatusRuntimeException) {
             Log.e(TAG, "⚠️ RPC failed: ${e.status}", e)

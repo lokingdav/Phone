@@ -57,8 +57,8 @@ object LibDia {
     /** Get the shared key (available after AKE completes). */
     external fun callStateGetSharedKey(handle: Long): ByteArray
 
-    /** Get the access ticket. */
-    external fun callStateGetTicket(handle: Long): ByteArray
+    /** Get the access token. */
+    external fun callStateGetToken(handle: Long): ByteArray
 
     /** Get the sender ID. */
     external fun callStateGetSenderId(handle: Long): String
@@ -157,12 +157,38 @@ object LibDia {
     /** Create a MAC for a message: K = H(token), MAC = HMAC(K, data). */
     external fun messageCreateMac(token: ByteArray, data: ByteArray): ByteArray
 
+    /** Create an access proof that discloses only expiration. */
+    external fun messageCreateAccess(
+        token: ByteArray,
+        data: ByteArray,
+        expiration: ByteArray,
+        accessSig: ByteArray,
+        enAttestSig: ByteArray,
+        accessVk: ByteArray
+    ): ByteArray
+
+    /** Create an access proof using access inputs from a client config. Returns [proof, expiration]. */
+    external fun messageCreateAccessFromConfig(
+        configHandle: Long,
+        token: ByteArray,
+        data: ByteArray
+    ): Array<ByteArray>
+
     /** Verify a message MAC using a VOPRF private key and token preimage. */
     external fun messageVerifyMac(
         atPrivateKey: ByteArray,
         tokenPreimage: ByteArray,
         data: ByteArray,
         mac: ByteArray
+    ): Boolean
+
+    /** Verify an access proof that discloses only expiration. */
+    external fun messageVerifyAccess(
+        token: ByteArray,
+        data: ByteArray,
+        expiration: ByteArray,
+        accessVk: ByteArray,
+        proof: ByteArray
     ): Boolean
 
     // ===================== DR Messaging =====================
@@ -181,7 +207,7 @@ object LibDia {
         phone: String,
         name: String,
         logoUrl: String?,
-        numTickets: Int
+        numTokens: Int
     ): Array<ByteArray>
 
     /**
@@ -199,9 +225,15 @@ object LibDia {
     /** Free enrollment keys handle. */
     external fun enrollmentKeysDestroy(keysHandle: ByteArray)
 
-    // ===================== Ticket Verification =====================
-    /** Verify a ticket using the VOPRF verification key. */
-    external fun verifyTicket(ticket: ByteArray, verifyKey: ByteArray): Boolean
+    /** Start enrollment by deriving the OTP challenge and request metadata. */
+    external fun enrollmentStart(requestPayload: ByteArray): Array<String>
+
+    /** Compute enrollment challenge from request payload and OTP code. */
+    external fun enrollmentComputeChallenge(requestPayload: ByteArray, otpCode: String): String
+
+    // ===================== Token Verification =====================
+    /** Verify a token using the VOPRF verification key. */
+    external fun verifyToken(token: ByteArray, verifyKey: ByteArray): Boolean
 }
 
 // ===================== High-Level Kotlin API =====================
@@ -228,6 +260,32 @@ data class OdaVerification(
     val expirationDate: String,
     val disclosedAttributes: Map<String, String>
 )
+
+/**
+ * Result of starting enrollment and generating the OTP challenge.
+ */
+data class StartEnrollmentResult(
+    val challengeHex: String,
+    val otpCode: String,
+    val phone: String
+)
+
+/**
+ * Result of creating an access proof from a config.
+ */
+data class AccessProofFromConfig(
+    val proof: ByteArray,
+    val expiration: ByteArray
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+        other as AccessProofFromConfig
+        return proof.contentEquals(other.proof) && expiration.contentEquals(other.expiration)
+    }
+
+    override fun hashCode(): Int = 31 * proof.contentHashCode() + expiration.contentHashCode()
+}
 
 /**
  * DIA client configuration with automatic resource management.
@@ -313,8 +371,8 @@ class CallState private constructor(internal val handle: Long) : AutoCloseable {
     /** Get the shared key (available after AKE completes). */
     val sharedKey: ByteArray get() = LibDia.callStateGetSharedKey(handle)
 
-    /** Get the access ticket. */
-    val ticket: ByteArray get() = LibDia.callStateGetTicket(handle)
+    /** Get the access token. */
+    val token: ByteArray get() = LibDia.callStateGetToken(handle)
 
     /** Get the sender ID for this party. */
     val senderId: String get() = LibDia.callStateGetSenderId(handle)
@@ -540,6 +598,37 @@ class DiaMessage private constructor(internal val handle: Long) : AutoCloseable 
 }
 
 /**
+ * Access proof helpers for RS verification flows.
+ */
+object AccessProof {
+    fun create(
+        token: ByteArray,
+        data: ByteArray,
+        expiration: ByteArray,
+        accessSig: ByteArray,
+        enAttestSig: ByteArray,
+        accessVk: ByteArray
+    ): ByteArray = LibDia.messageCreateAccess(token, data, expiration, accessSig, enAttestSig, accessVk)
+
+    fun createFromConfig(
+        config: DiaConfig,
+        token: ByteArray,
+        data: ByteArray
+    ): AccessProofFromConfig {
+        val result = LibDia.messageCreateAccessFromConfig(config.handle, token, data)
+        return AccessProofFromConfig(proof = result[0], expiration = result[1])
+    }
+
+    fun verify(
+        token: ByteArray,
+        data: ByteArray,
+        expiration: ByteArray,
+        accessVk: ByteArray,
+        proof: ByteArray
+    ): Boolean = LibDia.messageVerifyAccess(token, data, expiration, accessVk, proof)
+}
+
+/**
  * Enrollment helper for creating and finalizing enrollment.
  *
  * Example usage:
@@ -549,7 +638,7 @@ class DiaMessage private constructor(internal val handle: Long) : AutoCloseable 
  *     phone = "+1234567890",
  *     name = "Alice",
  *     logoUrl = "https://example.com/alice.jpg",
- *     numTickets = 5
+ *     numTokens = 5
  * )
  *
  * // Send requestData to server, receive response
@@ -587,22 +676,34 @@ object Enrollment {
             31 * keysHandle.contentHashCode() + requestData.contentHashCode()
     }
 
+    fun start(requestData: ByteArray): StartEnrollmentResult {
+        val result = LibDia.enrollmentStart(requestData)
+        return StartEnrollmentResult(
+            challengeHex = result[0],
+            otpCode = result[1],
+            phone = result[2]
+        )
+    }
+
+    fun computeChallenge(requestData: ByteArray, otpCode: String): String =
+        LibDia.enrollmentComputeChallenge(requestData, otpCode)
+
     /**
      * Create an enrollment request with all necessary keys.
      *
      * @param phone Phone number to enroll
      * @param name Display name
      * @param logoUrl Logo URL (optional)
-     * @param numTickets Number of tickets to request (typically 1-10)
+     * @param numTokens Number of tokens to request (typically 1-10)
      * @return Pair of keys handle and serialized request
      */
     fun createRequest(
         phone: String,
         name: String,
         logoUrl: String? = null,
-        numTickets: Int = 5
+        numTokens: Int = 5
     ): EnrollmentRequest {
-        val result = LibDia.enrollmentCreateRequest(phone, name, logoUrl, numTickets)
+        val result = LibDia.enrollmentCreateRequest(phone, name, logoUrl, numTokens)
         return EnrollmentRequest(keysHandle = result[0], requestData = result[1])
     }
 
